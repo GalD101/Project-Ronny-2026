@@ -59,7 +59,9 @@ def bandpass_filter(raw_signal, low_freq, high_freq, fs):
 if __name__ == "__main__":
     c3, c4 = load_and_pad_eeg('./WWT1_MC-P05.txt', TARGET_LENGTH)
     
-    time_axis = np.arange(1000) / FS  # First 1000 points (1,000 / 256 ~3.9 seconds)
+    window_start = 10 * FS
+    window_end = 11 * FS
+    time_axis = np.arange(window_start, window_end) / FS  # 10th to 11th second
     
     # plt.figure(figsize=(10, 4))
     # plt.plot(time_axis, c3[:1000], label='C3 Lead', color='red')
@@ -79,11 +81,13 @@ if __name__ == "__main__":
 
     # plot C3 raw vs filtered
     plt.figure(figsize=(10, 4))
-    plt.plot(time_axis, c3[:1000], label='C3 Raw', color='black')
-    plt.plot(time_axis, c3_filtered[:1000], label='C3 Filtered (7-13 Hz)', color='red')
+    plt.plot(time_axis, c3[window_start:window_end], label='C3 Raw', color='black')
+    plt.plot(time_axis, c3_filtered[window_start:window_end], label='C3 Filtered (7-13 Hz)', color='red')
     plt.title("C3 Signal: Raw vs Bandpass Filtered")
     plt.xlabel("Time [s]")
-    plt.ylabel("Voltage")
+    plt.ylabel("Voltage [µV]")
+    plt.xlim(10, 11)
+    plt.ylim(-20, 20)
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
@@ -91,11 +95,13 @@ if __name__ == "__main__":
 
     # plot C4 raw vs filtered
     plt.figure(figsize=(10, 4))
-    plt.plot(time_axis, c4[:1000], label='C4 Raw', color='black')
-    plt.plot(time_axis, c4_filtered[:1000], label='C4 Filtered (7-13 Hz)', color='blue')
+    plt.plot(time_axis, c4[window_start:window_end], label='C4 Raw', color='black')
+    plt.plot(time_axis, c4_filtered[window_start:window_end], label='C4 Filtered (7-13 Hz)', color='blue')
     plt.title("C4 Signal: Raw vs Bandpass Filtered")
     plt.xlabel("Time [s]")
-    plt.ylabel("Voltage")
+    plt.ylabel("Voltage [µV]")
+    plt.xlim(10, 11)
+    plt.ylim(-20, 20)
     plt.legend()
     plt.grid(True)
     plt.tight_layout()

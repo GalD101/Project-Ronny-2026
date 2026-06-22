@@ -2,10 +2,11 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-TARGET_LENGTH = 2**17  # Target length for fft (elongate the data by padding to this length) (512 seconds at 256 Hz)
-FS = 256               # Sampling frequency in Hz
+# DON'T USE THIS! FOR SOME REASON WE NEED TO PADD TO 2**17 AND NOT 2**16.
+calculate_target_length = lambda data: 2 ** int(np.ceil(np.log2(len(data))))
+FS = 256 # Sampling frequency in Hz
 
-def load_and_pad_eeg(filepath, target_length):
+def load_and_pad_eeg(filepath):
     df = pd.read_csv(filepath, sep='\t')
     df.columns = df.columns.str.strip() # just to make sure data is clean
     
@@ -14,8 +15,10 @@ def load_and_pad_eeg(filepath, target_length):
     c4_raw = df['C4'].values
     
     print(f"Original signal length: {len(c3_raw)} points")
+
+    target_length = 2**17 # calculate_target_length(c3_raw)
     
-    # Pad to exactly 2^17 points by repeating the array (fft friendly)
+    # Pad to exactly 2^17 points by repeating the array (fft friendly) (Why 2**17 and not 2**16?)
     # np.resize automatically loops the array if the target is larger
     c3_padded = np.resize(c3_raw, target_length)
     c4_padded = np.resize(c4_raw, target_length)
@@ -57,7 +60,8 @@ def bandpass_filter(raw_signal, low_freq, high_freq, fs):
 
 
 if __name__ == "__main__":
-    c3, c4 = load_and_pad_eeg('./WWT1_MC-P05.txt', TARGET_LENGTH)
+    # Load and pad the EEG data
+    c3, c4 = load_and_pad_eeg('./WWT1_MC-P05.txt')
     
     window_start = 10 * FS
     window_end = 11 * FS

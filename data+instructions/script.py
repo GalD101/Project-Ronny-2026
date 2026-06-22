@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# DON'T USE THIS! FOR SOME REASON WE NEED TO PADD TO 2**17 AND NOT 2**16.
+# DON'T USE THIS! FOR SOME REASON WE NEED TO PAD TO 2**17 AND NOT 2**16.
 calculate_target_length = lambda data: 2 ** int(np.ceil(np.log2(len(data))))
 FS = 256 # Sampling frequency in Hz
 
@@ -59,23 +59,29 @@ def bandpass_filter(raw_signal, low_freq, high_freq, fs):
     return np.real(filtered_signal)
 
 
+def plot_raw_vs_filtered(time_axis, raw_signal, filtered_signal, title, filtered_color):
+    plt.figure(figsize=(10, 4))
+    plt.plot(time_axis, raw_signal, label='Raw', color='black')
+    plt.plot(time_axis, filtered_signal, label='Filtered (7-13 Hz)', color=filtered_color)
+    plt.title(title)
+    plt.xlabel("Time [s]")
+    plt.ylabel("Voltage [µV]")
+    plt.xlim(10, 11)
+    plt.ylim(-20, 20)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+
 if __name__ == "__main__":
     # Load and pad the EEG data
     c3, c4 = load_and_pad_eeg('./WWT1_MC-P05.txt')
     
+    # Graph should show data from 10th to 11th second (like in fig5k.pdf)
     window_start = 10 * FS
     window_end = 11 * FS
     time_axis = np.arange(window_start, window_end) / FS  # 10th to 11th second
-    
-    # plt.figure(figsize=(10, 4))
-    # plt.plot(time_axis, c3[:1000], label='C3 Lead', color='red')
-    # plt.plot(time_axis, c4[:1000], label='C4 Lead', color='blue', alpha=0.7)
-    # plt.title("Raw EEG Data (First ~4 seconds)")
-    # plt.xlabel("Time [s]")
-    # plt.ylabel("Voltage")
-    # plt.legend()
-    # plt.grid(True)
-    # plt.show()
     
     # Apply band pass filter (7-13 Hz)
     low_freq = 7
@@ -84,29 +90,19 @@ if __name__ == "__main__":
     c4_filtered = bandpass_filter(c4, low_freq, high_freq, FS)
 
     # plot C3 raw vs filtered
-    plt.figure(figsize=(10, 4))
-    plt.plot(time_axis, c3[window_start:window_end], label='C3 Raw', color='black')
-    plt.plot(time_axis, c3_filtered[window_start:window_end], label='C3 Filtered (7-13 Hz)', color='red')
-    plt.title("C3 Signal: Raw vs Bandpass Filtered")
-    plt.xlabel("Time [s]")
-    plt.ylabel("Voltage [µV]")
-    plt.xlim(10, 11)
-    plt.ylim(-20, 20)
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+    plot_raw_vs_filtered(
+        time_axis,
+        c3[window_start:window_end],
+        c3_filtered[window_start:window_end],
+        "C3 Signal: Raw vs Bandpass Filtered",
+        "red",
+    )
 
     # plot C4 raw vs filtered
-    plt.figure(figsize=(10, 4))
-    plt.plot(time_axis, c4[window_start:window_end], label='C4 Raw', color='black')
-    plt.plot(time_axis, c4_filtered[window_start:window_end], label='C4 Filtered (7-13 Hz)', color='blue')
-    plt.title("C4 Signal: Raw vs Bandpass Filtered")
-    plt.xlabel("Time [s]")
-    plt.ylabel("Voltage [µV]")
-    plt.xlim(10, 11)
-    plt.ylim(-20, 20)
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+    plot_raw_vs_filtered(
+        time_axis,
+        c4[window_start:window_end],
+        c4_filtered[window_start:window_end],
+        "C4 Signal: Raw vs Bandpass Filtered",
+        "blue",
+    )

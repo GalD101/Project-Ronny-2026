@@ -90,7 +90,7 @@ def bandpass_filter_hardcoded_indices(raw_signal):
     band_mask[neg_start : neg_end + 1] = True
 
     # 4. Apply the mask to the FFT coefficients
-    filtered_fft = np.fft.fft(raw_signal) * band_mask
+    filtered_fft = np.fft.fft(raw_signal) * band_mask # multiplication in frequency domain is convolution in time domain
 
     # 5. Inverse FFT to get the filtered signal back in the time domain
     filtered_signal = np.fft.ifft(filtered_fft)

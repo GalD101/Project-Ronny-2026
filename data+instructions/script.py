@@ -18,7 +18,7 @@ def load_and_pad_eeg(filepath):
 
     target_length = 2**17 # calculate_target_length(c3_raw)
     
-    # Pad to exactly 2^17 points by repeating the array (fft friendly) (Why 2**17 and not 2**16?)
+    # Pad to exactly 2^17 points by copy-pasting additional copies of the time series as instructed. (I think it is FFT friendly but I need to check why 2**17 and not 2**16? Maybe we want a longer sequence?)
     # np.resize automatically loops the array if the target is larger
     c3_padded = np.resize(c3_raw, target_length)
     c4_padded = np.resize(c4_raw, target_length)
@@ -59,7 +59,8 @@ def bandpass_filter(raw_signal, low_freq, high_freq, fs):
     band_mask = (np.abs(freq_bins) >= low_freq) & (np.abs(freq_bins) <= high_freq)
 
     # Apply the mask to the FFT coefficients
-    filtered_fft = np.fft.fft(raw_signal) * band_mask
+    # [1, 2, 3] * [4, 5, 6] = [4, 10, 18] (element-wise multiplication)
+    filtered_fft = np.fft.fft(raw_signal) * band_mask # multiplication in frequency domain is convolution in time domain
 
     # Inverse FFT to get the filtered signal back in the time domain
     filtered_signal = np.fft.ifft(filtered_fft)
@@ -90,6 +91,7 @@ def bandpass_filter_hardcoded_indices(raw_signal):
     band_mask[neg_start : neg_end + 1] = True
 
     # 4. Apply the mask to the FFT coefficients
+    # [1, 2, 3] * [4, 5, 6] = [4, 10, 18] (element-wise multiplication)
     filtered_fft = np.fft.fft(raw_signal) * band_mask # multiplication in frequency domain is convolution in time domain
 
     # 5. Inverse FFT to get the filtered signal back in the time domain

@@ -230,10 +230,12 @@ if __name__ == "__main__":
     # PHASE DIFFERENCES & SYNCHRONIZATION
     # ==========================================
     print("Calculating phase differences and complex exponentials...")
+    raw_phase_diff = phase_c3 - phase_c4
     
-    # (d) Calculate phase differences (ΔΦ)
-    phase_diff = phase_c3 - phase_c4
+    # Wrap the phase difference to be strictly between -pi and pi (-3.14 to 3.14)
+    phase_diff = np.angle(np.exp(1j * raw_phase_diff))
     
+    complex_exp = np.exp(1j * phase_diff)
     # Plot Phase Difference (d) for the 10th to 11th second
     plt.figure(figsize=(10, 4))
     plt.plot(time_axis, phase_diff[window_start:window_end], color='purple', label='Δ Phase (C3 - C4)')
@@ -269,3 +271,150 @@ if __name__ == "__main__":
     
     print("SUCCESS!")
     print(f"Phase Synchronization Index for C3-C4 (Alpha Band): {psi:.4f}")
+
+
+
+    # ==========================================
+    # PUBLICATION-STYLE PLOTTING (SEPARATE WINDOWS)
+    # ==========================================
+    
+    # Wrap the phase difference to be strictly between -pi and pi
+    phase_diff_wrapped = np.angle(np.exp(1j * (phase_c3 - phase_c4)))
+    
+    # Slice the arrays for the 1-second window
+    t_win = time_axis
+    c3_raw_win = c3[window_start:window_end]
+    c3_filt_win = c3_filtered[window_start:window_end]
+    c4_raw_win = c4[window_start:window_end]
+    c4_filt_win = c4_filtered[window_start:window_end]
+    
+    # Slice the phase arrays
+    p_c3_win = phase_c3[window_start:window_end]
+    p_c4_win = phase_c4[window_start:window_end]
+    p_diff_win = phase_diff_wrapped[window_start:window_end]
+    c_exp_win = complex_exp[window_start:window_end] 
+
+    # ---------------------------------------------------------
+    # WINDOW 1: Panels (a), (b), and (c) Stacked
+    # ---------------------------------------------------------
+    fig1, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+    
+    # Panel (a): C3 Raw vs Filtered
+    ax1.plot(t_win, c3_raw_win, color='black', label='Raw', linewidth=1)
+    ax1.plot(t_win, c3_filt_win, color='red', label='Filtered (7-13 Hz)', linewidth=2)
+    ax1.set_ylabel("C3 [µV]")
+    ax1.set_title("(a) C3 Signal")
+    ax1.legend(loc='upper right')
+
+    # Panel (b): C4 Raw vs Filtered
+    ax2.plot(t_win, c4_raw_win, color='black', label='Raw', linewidth=1)
+    ax2.plot(t_win, c4_filt_win, color='blue', label='Filtered (7-13 Hz)', linewidth=2)
+    ax2.set_ylabel("C4 [µV]")
+    ax2.set_title("(b) C4 Signal")
+    ax2.legend(loc='upper right')
+
+    # Panel (c): Phase Angles (The Sawtooth Graph)
+    ax3.plot(t_win, p_c3_win, color='red', label='Φ C3', linewidth=2)
+    ax3.plot(t_win, p_c4_win, color='blue', label='Φ C4', linewidth=2)
+    ax3.set_ylabel("Phase [rad]")
+    ax3.set_title("(c) Phase Angle (Sawtooth)")
+    ax3.set_ylim(-np.pi, np.pi)
+    ax3.set_yticks([-np.pi, 0, np.pi])
+    ax3.set_yticklabels([r'$-\pi$', '0', r'$\pi$']) # Fixed the \pi warning here
+    ax3.legend(loc='upper right')
+
+    for ax in (ax1, ax2, ax3):
+        ax.set_xlim(10, 11)
+        ax.grid(False)
+    
+    fig1.tight_layout()
+
+    # ---------------------------------------------------------
+    # PROPER PHASE DIFFERENCE CALCULATION
+    # ---------------------------------------------------------
+    # 1. Subtract exactly as the text dictates: Φ2 - Φ1 (C4 - C3)
+    # 2. Wrap it mathematically to force it strictly between -pi and pi
+    phase_diff_wrapped = np.angle(np.exp(1j * (phase_c4 - phase_c3)))
+    
+    # Slice the arrays for the 1-second window
+    p_diff_win = phase_diff_wrapped[window_start:window_end]
+    
+    # Calculate complex exponentials using the wrapped difference
+    complex_exp = np.exp(1j * phase_diff_wrapped)
+    c_exp_win = complex_exp[window_start:window_end]
+
+    # ---------------------------------------------------------
+    # WINDOW 2: Panel (d) Phase Difference
+    # ---------------------------------------------------------
+    fig2, ax4 = plt.subplots(figsize=(10, 4))
+    
+    # Plot the phase difference as HOLLOW black discrete circles
+    ax4.plot(t_win, p_diff_win, marker='o', markerfacecolor='none', 
+             markeredgecolor='black', markersize=4, linestyle='None')
+    
+    # --- ADD THE FILLED MARKER CIRCLES ---
+    # Select two specific points in time to mark
+    idx_blue = int(len(t_win) * 0.3) 
+    idx_magenta = int(len(t_win) * 0.8) 
+    
+    # Draw the Blue and Magenta SOLID circles
+    ax4.plot(t_win[idx_blue], p_diff_win[idx_blue], marker='o', 
+             color='blue', markersize=10, linestyle='None')
+             
+    ax4.plot(t_win[idx_magenta], p_diff_win[idx_magenta], marker='o', 
+             color='magenta', markersize=10, linestyle='None')
+    # ------------------------------
+
+    ax4.set_ylabel("ΔΦ [rad]")
+    ax4.set_title("(d) Phase Difference (C4 - C3)")
+    ax4.set_xlabel("Time [s]")
+    
+    # Lock the Y-axis exactly to the boundaries the paper specifies
+    ax4.set_ylim(-np.pi, np.pi)
+    ax4.set_yticks([-np.pi, 0, np.pi])
+    ax4.set_yticklabels([r'$-\pi$', '0', r'$\pi$'])
+    ax4.set_xlim(10, 11)
+    ax4.grid(False)
+    fig2.tight_layout()
+
+    # ---------------------------------------------------------
+    # WINDOW 3: Panel (e) Complex Exponentials (Unit Circle)
+    # ---------------------------------------------------------
+    fig3, ax5 = plt.subplots(figsize=(6, 6))
+    
+    # Draw the empty unit circle
+    circle = plt.Circle((0, 0), 1, color='black', fill=False, linestyle='--')
+    ax5.add_patch(circle)
+    
+    # Plot the phase differences on the unit circle as HOLLOW black discrete circles
+    ax5.plot(np.real(c_exp_win), np.imag(c_exp_win), marker='o', 
+             markerfacecolor='none', markeredgecolor='black', 
+             markersize=4, linestyle='None', alpha=0.7, label='exp(i*ΔΦ)')
+    
+    # --- ADD THE FILLED MARKER CIRCLES TO THE COMPLEX PLANE ---
+    # Draw the exact same Blue and Magenta points on the circle
+    ax5.plot(np.real(c_exp_win[idx_blue]), np.imag(c_exp_win[idx_blue]), 
+             marker='o', color='blue', markersize=10, linestyle='None')
+             
+    ax5.plot(np.real(c_exp_win[idx_magenta]), np.imag(c_exp_win[idx_magenta]), 
+             marker='o', color='magenta', markersize=10, linestyle='None')
+    # ----------------------------------------------------------
+    
+    # Calculate mean vector and draw red arrow + red dot (PSI)
+    mean_vector = np.mean(c_exp_win)
+    ax5.arrow(0, 0, np.real(mean_vector), np.imag(mean_vector), 
+              color='red', head_width=0.05, length_includes_head=True, linewidth=2)
+    ax5.plot(np.real(mean_vector), np.imag(mean_vector), marker='o', 
+             color='red', markersize=8, linestyle='None', label='Mean (PSI)') 
+
+    ax5.set_aspect('equal') 
+    ax5.set_xlim(-1.2, 1.2)
+    ax5.set_ylim(-1.2, 1.2)
+    ax5.set_title("(e) Complex Exponentials")
+    ax5.set_xlabel("Real Part")
+    ax5.set_ylabel("Imaginary Part")
+    ax5.legend(loc='upper right', fontsize='small')
+    fig3.tight_layout()
+
+    # Show all three windows at once
+    plt.show()

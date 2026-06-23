@@ -44,6 +44,14 @@ def bandpass_filter(raw_signal, low_freq, high_freq, fs):
     #         y[j + n//2] = P_even[j] - w * P_odd[j]
     #    return y
 
+    # --- NOTE ON FREQUENCY INDICES ---
+    # The instructions suggested using hardcoded indices (7*2^9 to 13*2^9 and the 
+    # corresponding negative frequencies 2^17 - 13*2^9 to 2^17 - 7*2^9).
+    # Instead, this code dynamically calculates the physical Hz bins using np.fft.fftfreq.
+    # Because our resolution is exactly fs/N = 256 / 2^17 = 1/512 Hz per step, 
+    # mapping 7 Hz dynamically is mathematically identical to targeting index 7 * 2^9.
+    # Using np.abs() dynamically handles both the positive and negative frequency blocks.
+
     # Compute the frequency bins for the FFT
     freq_bins = np.fft.fftfreq(len(raw_signal), d=1/fs)
 
@@ -58,6 +66,36 @@ def bandpass_filter(raw_signal, low_freq, high_freq, fs):
 
     return np.real(filtered_signal)
 
+
+def bandpass_filter_hardcoded_indices(raw_signal):
+    """
+    Strict filter using the suggested hardcoded mathematical indices for the Alpha band.
+    This assumes the input signal length is EXACTLY 2^17 and FS is 256 Hz.
+    """
+    N = len(raw_signal) # Assumed to be 131072
+    
+    # 1. Define the suggested exact indices
+    pos_start = 7 * (2**9)
+    pos_end = 13 * (2**9)
+    
+    neg_start = (2**17) - 13 * (2**9)
+    neg_end = (2**17) - 7 * (2**9)
+    
+    # 2. Initialize an all-zero (False) logical mask
+    band_mask = np.zeros(N, dtype=bool)
+    
+    # 3. Set the specific index windows to True
+    # We add +1 to the end indices because Python slices (start:end) exclude the last number
+    band_mask[pos_start : pos_end + 1] = True
+    band_mask[neg_start : neg_end + 1] = True
+
+    # 4. Apply the mask to the FFT coefficients
+    filtered_fft = np.fft.fft(raw_signal) * band_mask
+
+    # 5. Inverse FFT to get the filtered signal back in the time domain
+    filtered_signal = np.fft.ifft(filtered_fft)
+
+    return np.real(filtered_signal)
 
 def plot_raw_vs_filtered(time_axis, raw_signal, filtered_signal, title, filtered_color):
     plt.figure(figsize=(10, 4))

@@ -48,7 +48,7 @@ def bandpass_filter(raw_signal, low_freq, high_freq, fs):
     freq_bins = np.fft.fftfreq(len(raw_signal), d=1/fs)
 
     # Create a mask to keep only the frequencies in the desired band
-    band_mask = (freq_bins >= low_freq) & (freq_bins <= high_freq)
+    band_mask = (np.abs(freq_bins) >= low_freq) & (np.abs(freq_bins) <= high_freq)
 
     # Apply the mask to the FFT coefficients
     filtered_fft = np.fft.fft(raw_signal) * band_mask

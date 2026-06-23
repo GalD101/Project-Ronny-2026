@@ -2,8 +2,9 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-# DON'T USE THIS! FOR SOME REASON WE NEED TO PAD TO 2**17 AND NOT 2**16.
+# DON'T USE THIS! FOR SOME REASON WE NEED TO PAD TO 2**17 AND NOT 2**16 (which is the closest power of 2).
 calculate_target_length = lambda data: 2 ** int(np.ceil(np.log2(len(data))))
+TARGET_LENGTH = 2**17 # 131072 points #(calculate_target_length(c3_raw))
 FS = 256 # Sampling frequency in Hz
 
 def load_and_pad_eeg(filepath):
@@ -15,15 +16,13 @@ def load_and_pad_eeg(filepath):
     c4_raw = df['C4'].values
     
     print(f"Original signal length: {len(c3_raw)} points")
-
-    target_length = 2**17 # calculate_target_length(c3_raw)
     
-    # Pad to exactly 2^17 points by copy-pasting additional copies of the time series as instructed. (I think it is FFT friendly but I need to check why 2**17 and not 2**16? Maybe we want a longer sequence?)
+    # Pad to exactly 2^17 points by copy-pasting additional copies of the time series as instructed. (I think it is FFT friendly but I need to check why 2**17 and not 2**16 (which is the closest power of 2)? Maybe we want a longer sequence?)
     # np.resize automatically loops the array if the target is larger
-    c3_padded = np.resize(c3_raw, target_length)
-    c4_padded = np.resize(c4_raw, target_length)
-    
-    print(f"Padded signal length: {len(c3_padded)} points (should be 512 * 256 = 131072)")
+    c3_padded = np.resize(c3_raw, TARGET_LENGTH)
+    c4_padded = np.resize(c4_raw, TARGET_LENGTH)
+
+    print(f"Padded signal length: {len(c3_padded)} points (should be 512 * 256 = 131072 = 2^17)")
     
     return c3_padded, c4_padded
 
@@ -73,7 +72,7 @@ def bandpass_filter_hardcoded_indices(raw_signal):
     Strict filter using the suggested hardcoded mathematical indices for the Alpha band.
     This assumes the input signal length is EXACTLY 2^17 and FS is 256 Hz.
     """
-    N = len(raw_signal) # Assumed to be 131072
+    N = len(raw_signal) # Assumed to be 2^17 = 131072
     
     # 1. Define the suggested exact indices
     pos_start = 7 * (2**9)
@@ -113,6 +112,33 @@ def plot_raw_vs_filtered(time_axis, raw_signal, filtered_signal, title, filtered
     plt.tight_layout()
     plt.show()
 
+def custom_hilbert_transform(signal):
+    """
+    Computes the Hilbert transform (the 90-degree phase shift) of a real signal.
+    """
+
+    # Hilbert transform:
+    # 1. Take FFT of signal
+    # 2. Rotate Fourier coefficients by 90 degrees (cos -> sin, sin -> -cos) (same as multiplying by i in the frequency domain)
+    # 3. Take iFFT of rotated Fourier coefficients
+
+    # Used information from this video: https://youtu.be/VyLU8hlhI-I
+
+    # Step 1: Compute the FFT of the signal
+    fft_signal = np.fft.fft(signal)
+
+    # Step 2: Multiply by the Hilbert transform multiplier 
+    # (Multiply by -i for positive frequencies, +i for negative frequencies)
+    N = len(signal)
+    hilbert_multiplier = np.zeros(N, dtype=complex)
+    hilbert_multiplier[1:N//2] = -1j  # Positive frequencies
+    hilbert_multiplier[N//2+1:] = 1j  # Negative frequencies
+    
+    hilbert_transformed_fft = fft_signal * hilbert_multiplier
+
+    # Step 3: Take the inverse FFT to get the Hilbert transform in the time domain
+    # We use np.real() to discard microscopic imaginary rounding errors
+    return np.real(np.fft.ifft(hilbert_transformed_fft))
 
 if __name__ == "__main__":
     # Load and pad the EEG data
@@ -124,10 +150,13 @@ if __name__ == "__main__":
     time_axis = np.arange(window_start, window_end) / FS  # 10th to 11th second
     
     # Apply band pass filter (7-13 Hz)
-    low_freq = 7
-    high_freq = 13
-    c3_filtered = bandpass_filter(c3, low_freq, high_freq, FS)
-    c4_filtered = bandpass_filter(c4, low_freq, high_freq, FS)
+    # low_freq = 7
+    # high_freq = 13
+    # c3_filtered = bandpass_filter(c3, low_freq, high_freq, FS)
+    # c4_filtered = bandpass_filter(c4, low_freq, high_freq, FS)
+    c3_filtered = bandpass_filter_hardcoded_indices(c3)
+    c4_filtered = bandpass_filter_hardcoded_indices(c4)
+
 
     # plot C3 raw vs filtered
     plot_raw_vs_filtered(
@@ -146,3 +175,63 @@ if __name__ == "__main__":
         "C4 Signal: Raw vs Bandpass Filtered",
         "blue",
     )
+
+    # ==========================================
+    # HILBERT TRANSFORM & PHASE EXTRACTION
+    # ==========================================
+    print("Extracting instantaneous phase...")
+    
+    # 1. Apply the manual Hilbert transform to the ALREADY FILTERED signals
+    c3_hilbert = custom_hilbert_transform(c3_filtered)
+    c4_hilbert = custom_hilbert_transform(c4_filtered)
+
+    # 2. Extract the instantaneous phase using arctan2
+    # according to the instructions: atan2(Hilbert Transformed, Real Filtered)
+    phase_c3 = np.arctan2(c3_hilbert, c3_filtered)
+    phase_c4 = np.arctan2(c4_hilbert, c4_filtered)
+
+    print("Phase extraction complete!")
+
+
+    # ==========================================
+    # PHASE DIFFERENCES & SYNCHRONIZATION
+    # ==========================================
+    print("Calculating phase differences and complex exponentials...")
+    
+    # (d) Calculate phase differences (ΔΦ)
+    phase_diff = phase_c3 - phase_c4
+    
+    # Plot Phase Difference (d) for the 10th to 11th second
+    plt.figure(figsize=(10, 4))
+    plt.plot(time_axis, phase_diff[window_start:window_end], color='purple', label='Δ Phase (C3 - C4)')
+    plt.title("Phase Difference (ΔΦ) over Time")
+    plt.xlabel("Time [s]")
+    plt.ylabel("Phase Difference [rad]")
+    plt.xlim(10, 11)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    # (e) Calculate complex exponentials of the phase differences
+    complex_exp = np.exp(1j * phase_diff)
+    
+    # Plot the Real part of the Complex Exponential (e)
+    # The real part is mathematically equivalent to cos(ΔΦ)
+    plt.figure(figsize=(10, 4))
+    plt.plot(time_axis, np.real(complex_exp)[window_start:window_end], color='green', label='Re{ exp(i*ΔΦ) }')
+    plt.title("Complex Exponential of Phase Difference (Real Part)")
+    plt.xlabel("Time [s]")
+    plt.ylabel("Amplitude")
+    plt.xlim(10, 11)
+    plt.ylim(-1.5, 1.5)
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    # Calculate the final Phase Synchronization Index (PSI)
+    # PSI = | < e^(i * ΔΦ) > | (The absolute value of the mean vector)
+    psi = np.abs(np.mean(complex_exp))
+    print(f"\nSUCCESS!")
+    print(f"Phase Synchronization Index for C3-C4 (Alpha Band): {psi:.4f}")

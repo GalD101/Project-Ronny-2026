@@ -6,32 +6,32 @@ import matplotlib.pyplot as plt
 # GLOBAL CONFIGURATION & HELPER FUNCTIONS
 # ==========================================
 
-# DON'T USE THIS! FOR SOME REASON WE NEED TO PAD TO 2**17 AND NOT 2**16 (which is the closest next power of two).
+# Calculate the next power of 2 for padding (not using this because I am explicitly told to use 2^17)
 calculate_target_length = lambda data: 2 ** int(np.ceil(np.log2(len(data))))
 FS = 256 # Sampling frequency in Hz
 
 def load_and_pad_eeg(filepath):
     """
     Loads raw EEG data from a tab-separated text file, extracts the C3 and C4 
-    electrodes, and pads them to a length of 2^17 points (512 seconds) by looping.
+    electrodes, and pads them to a length of 2^17 points (512 seconds).
     """
     df = pd.read_csv(filepath, sep='\t')
     df.columns = df.columns.str.strip() # just to make sure data is clean
     
-    # Extract the C3 and C4 leads as NumPy arrays
     c3_raw = df['C3'].values
     c4_raw = df['C4'].values
     
-    print(f"  -> Original signal length: {len(c3_raw)} points")
+    target_length = 2**17 
+    print(f"  -> Original signal length(c3): {len(c3_raw)} points")
+    print(f"  -> Original signal length(c4): {len(c4_raw)} points")
+    print(f"  -> Nearest power of 2 for padding(c3): {calculate_target_length(c3_raw)} = 2^{int(np.log2(calculate_target_length(c3_raw)))} points")
+    print(f"  -> Nearest power of 2 for padding(c4): {calculate_target_length(c4_raw)} = 2^{int(np.log2(calculate_target_length(c4_raw)))} points")
+    print(f"  -> Padding both signals to {target_length} points (512 seconds)... regardless of original length.")
 
-    target_length = 2**17 # calculate_target_length(c3_raw)
-    
-    # Pad to exactly 2^17 points by copy-pasting additional copies of the time series as instructed. (I think it is FFT friendly but I need to check why 2**17 and not 2**16 (which is the closest power of 2)? Maybe we want a longer sequence?)
-    # np.resize automatically loops the array if the target is larger
     c3_padded = np.resize(c3_raw, target_length)
     c4_padded = np.resize(c4_raw, target_length)
     
-    print(f"  -> Padded signal length: {len(c3_padded)} points (should be 512 * 256 = 131072)")
+    print(f"  -> Padded signal length: {len(c3_padded)} points (should be 512 * 256 = 131072 = 2^17)")
     
     return c3_padded, c4_padded
 
@@ -85,51 +85,22 @@ def bandpass_filter_dynamic(raw_signal, low_freq, high_freq, fs):
 def bandpass_filter_hardcoded_indices(raw_signal):
     """
     Strict filter using the suggested hardcoded mathematical indices for the Alpha band.
-    This assumes the input signal length is EXACTLY 2^17 and FS is 256 Hz.
     """
-    N = len(raw_signal) # Assumed to be 2^17 = 131072
+    N = len(raw_signal)
     
-    # 1. Define the suggested exact indices
     pos_start = 7 * (2**9)
     pos_end = 13 * (2**9)
-    
     neg_start = (2**17) - 13 * (2**9)
     neg_end = (2**17) - 7 * (2**9)
     
-    # 2. Initialize an all-zero (False) logical mask
     band_mask = np.zeros(N, dtype=bool)
-    
-    # 3. Set the specific index windows to True
-    # We add +1 to the end indices because Python slices (start:end) exclude the last number
     band_mask[pos_start : pos_end + 1] = True
     band_mask[neg_start : neg_end + 1] = True
 
-    # 4. Apply the mask to the FFT coefficients
-    # Multiplying by the boolean mask explicitly sets all other complex coefficients to zero.
-    filtered_fft = np.fft.fft(raw_signal) * band_mask # multiplication in frequency domain is convolution in time domain
-
-    # 5. Inverse FFT to get the filtered signal back in the time domain
+    filtered_fft = np.fft.fft(raw_signal) * band_mask 
     filtered_signal = np.fft.ifft(filtered_fft)
 
     return np.real(filtered_signal)
-
-def plot_raw_vs_filtered(time_axis, raw_signal, filtered_signal, title, filtered_color):
-    """
-    Generates a localized plot comparing the raw voltage to the filtered oscillatory 
-    wave over a specific 1-second window to verify filter integrity.
-    """
-    plt.figure(figsize=(10, 4))
-    plt.plot(time_axis, raw_signal, label='Raw', color='black')
-    plt.plot(time_axis, filtered_signal, label='Filtered (7-13 Hz)', color=filtered_color)
-    plt.title(title)
-    plt.xlabel("Time [s]")
-    plt.ylabel("Voltage [µV]")
-    plt.xlim(10, 11)
-    plt.ylim(-20, 20)
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
 
 def custom_hilbert_transform(signal):
     """
@@ -145,141 +116,53 @@ def custom_hilbert_transform(signal):
     # Step 1: Compute the FFT of the signal
     fft_signal = np.fft.fft(signal)
 
-    # Step 2: Multiply by the Hilbert transform multiplier 
-    # (Multiply by -i for positive frequencies, +i for negative frequencies)
+    # Step 2: Create the Hilbert transform multiplier (multiply by -i for positive frequencies, i for negative frequencies)
     N = len(signal)
     hilbert_multiplier = np.zeros(N, dtype=complex)
-    hilbert_multiplier[1:N//2] = -1j  # Positive frequencies
-    hilbert_multiplier[N//2+1:] = 1j  # Negative frequencies
-    
+    hilbert_multiplier[1:N//2] = -1j
+    hilbert_multiplier[N//2+1:] = 1j
     hilbert_transformed_fft = fft_signal * hilbert_multiplier
 
-    # Step 3: Take the inverse FFT to get the Hilbert transform in the time domain
-    # We use np.real() to discard small imaginary rounding errors
+    # Step 3: Compute the iFFT of the transformed signal
     return np.real(np.fft.ifft(hilbert_transformed_fft))
-
 
 if __name__ == "__main__":
     # ==========================================
-    # DATA LOADING & PADDING
+    # DATA PROCESSING PIPELINE
     # ==========================================
     print("Loading and padding EEG data...")
     c3, c4 = load_and_pad_eeg('./WWT1_MC-P05.txt')
     print("Data loading complete!\n")
     
-    # Graph should show data from 10th to 11th second (like in fig5k.pdf)
     window_start = 10 * FS
     window_end = 11 * FS
-    time_axis = np.arange(window_start, window_end) / FS  # 10th to 11th second
+    time_axis = np.arange(window_start, window_end) / FS  
     
-    # ==========================================
-    # FREQUENCY FILTERING (ALPHA BAND 7-13 Hz)
-    # ==========================================
     print("Applying bandpass filters (7-13 Hz)...")
-    low_freq = 7
-    high_freq = 13
-    
-    # c3_filtered = bandpass_filter_dynamic(c3, low_freq, high_freq, FS)
-    # c4_filtered = bandpass_filter_dynamic(c4, low_freq, high_freq, FS)
-    # Using the hardcoded version, but dynamic version is available
     c3_filtered = bandpass_filter_hardcoded_indices(c3)
     c4_filtered = bandpass_filter_hardcoded_indices(c4)
     print("Filtering complete!\n")
 
-    # ==========================================
-    # VERIFICATION PLOTS
-    # ==========================================
-    print("Plotting raw vs filtered signals...")
-    
-    # plot C3 raw vs filtered
-    plot_raw_vs_filtered(
-        time_axis,
-        c3[window_start:window_end],
-        c3_filtered[window_start:window_end],
-        "C3 Signal: Raw vs Bandpass Filtered",
-        "red",
-    )
-
-    # plot C4 raw vs filtered
-    plot_raw_vs_filtered(
-        time_axis,
-        c4[window_start:window_end],
-        c4_filtered[window_start:window_end],
-        "C4 Signal: Raw vs Bandpass Filtered",
-        "blue",
-    )
-    print("Plots generated!\n")
-
-    # ==========================================
-    # HILBERT TRANSFORM & PHASE EXTRACTION
-    # ==========================================
     print("Extracting instantaneous phase...")
-    
-    # 1. Apply the manual Hilbert transform to the ALREADY FILTERED signals
     c3_hilbert = custom_hilbert_transform(c3_filtered)
     c4_hilbert = custom_hilbert_transform(c4_filtered)
 
-    # 2. Extract the instantaneous phase using arctan2
-    # According to the instructions: atan2(Hilbert Transformed, Real Filtered)
     phase_c3 = np.arctan2(c3_hilbert, c3_filtered)
     phase_c4 = np.arctan2(c4_hilbert, c4_filtered)
-
     print("Phase extraction complete!\n")
 
-    # ==========================================
-    # PHASE DIFFERENCES & SYNCHRONIZATION
-    # ==========================================
     print("Calculating phase differences and complex exponentials...")
-    raw_phase_diff = phase_c3 - phase_c4
-    
-    # Wrap the phase difference to be strictly between -pi and pi (-3.14 to 3.14)
-    phase_diff = np.angle(np.exp(1j * raw_phase_diff))
-    
-    complex_exp = np.exp(1j * phase_diff)
-    # Plot Phase Difference (d) for the 10th to 11th second
-    plt.figure(figsize=(10, 4))
-    plt.plot(time_axis, phase_diff[window_start:window_end], color='purple', label='Δ Phase (C3 - C4)')
-    plt.title("Phase Difference (ΔΦ) over Time")
-    plt.xlabel("Time [s]")
-    plt.ylabel("Phase Difference [rad]")
-    plt.xlim(10, 11)
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-    # (e) Calculate complex exponentials of the phase differences
-    complex_exp = np.exp(1j * phase_diff)
-    
-    # Plot the Real part of the Complex Exponential (e)
-    # The real part is mathematically equivalent to cos(ΔΦ)
-    plt.figure(figsize=(10, 4))
-    plt.plot(time_axis, np.real(complex_exp)[window_start:window_end], color='green', label='Re{ exp(i*ΔΦ) }')
-    plt.title("Complex Exponential of Phase Difference (Real Part)")
-    plt.xlabel("Time [s]")
-    plt.ylabel("Amplitude")
-    plt.xlim(10, 11)
-    plt.ylim(-1.5, 1.5)
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
-
-    # Calculate the final Phase Synchronization Index (PSI)
-    # PSI = | < e^(i * ΔΦ) > | (The absolute value of the mean vector)
-    psi = np.abs(np.mean(complex_exp))
+    # Calculate Phase Synchronization Index (PSI) over the whole dataset
+    phase_diff_wrapped_full = np.angle(np.exp(1j * (phase_c4 - phase_c3)))
+    complex_exp_full = np.exp(1j * phase_diff_wrapped_full)
+    psi = np.abs(np.mean(complex_exp_full))
     
     print("SUCCESS!")
     print(f"Phase Synchronization Index for C3-C4 (Alpha Band): {psi:.4f}")
 
-
-
     # ==========================================
-    # PUBLICATION-STYLE PLOTTING (SEPARATE WINDOWS)
+    # PUBLICATION-STYLE PLOTTING (FINAL 3 WINDOWS ONLY)
     # ==========================================
-    
-    # Wrap the phase difference to be strictly between -pi and pi
-    phase_diff_wrapped = np.angle(np.exp(1j * (phase_c3 - phase_c4)))
     
     # Slice the arrays for the 1-second window
     t_win = time_axis
@@ -288,39 +171,35 @@ if __name__ == "__main__":
     c4_raw_win = c4[window_start:window_end]
     c4_filt_win = c4_filtered[window_start:window_end]
     
-    # Slice the phase arrays
     p_c3_win = phase_c3[window_start:window_end]
     p_c4_win = phase_c4[window_start:window_end]
-    p_diff_win = phase_diff_wrapped[window_start:window_end]
-    c_exp_win = complex_exp[window_start:window_end] 
+    p_diff_win = phase_diff_wrapped_full[window_start:window_end]
+    c_exp_win = complex_exp_full[window_start:window_end] 
 
     # ---------------------------------------------------------
     # WINDOW 1: Panels (a), (b), and (c) Stacked
     # ---------------------------------------------------------
     fig1, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
     
-    # Panel (a): C3 Raw vs Filtered
     ax1.plot(t_win, c3_raw_win, color='black', label='Raw', linewidth=1)
     ax1.plot(t_win, c3_filt_win, color='red', label='Filtered (7-13 Hz)', linewidth=2)
     ax1.set_ylabel("C3 [µV]")
     ax1.set_title("(a) C3 Signal")
     ax1.legend(loc='upper right')
 
-    # Panel (b): C4 Raw vs Filtered
     ax2.plot(t_win, c4_raw_win, color='black', label='Raw', linewidth=1)
     ax2.plot(t_win, c4_filt_win, color='blue', label='Filtered (7-13 Hz)', linewidth=2)
     ax2.set_ylabel("C4 [µV]")
     ax2.set_title("(b) C4 Signal")
     ax2.legend(loc='upper right')
 
-    # Panel (c): Phase Angles (The Sawtooth Graph)
     ax3.plot(t_win, p_c3_win, color='red', label='Φ C3', linewidth=2)
     ax3.plot(t_win, p_c4_win, color='blue', label='Φ C4', linewidth=2)
     ax3.set_ylabel("Phase [rad]")
-    ax3.set_title("(c) Phase Angle (Sawtooth)")
+    ax3.set_title("(c) Phase Angle")
     ax3.set_ylim(-np.pi, np.pi)
     ax3.set_yticks([-np.pi, 0, np.pi])
-    ax3.set_yticklabels([r'$-\pi$', '0', r'$\pi$']) # Fixed the \pi warning here
+    ax3.set_yticklabels([r'$-\pi$', '0', r'$\pi$'])
     ax3.legend(loc='upper right')
 
     for ax in (ax1, ax2, ax3):
@@ -330,46 +209,25 @@ if __name__ == "__main__":
     fig1.tight_layout()
 
     # ---------------------------------------------------------
-    # PROPER PHASE DIFFERENCE CALCULATION
-    # ---------------------------------------------------------
-    # 1. Subtract exactly as the text dictates: Φ2 - Φ1 (C4 - C3)
-    # 2. Wrap it mathematically to force it strictly between -pi and pi
-    phase_diff_wrapped = np.angle(np.exp(1j * (phase_c4 - phase_c3)))
-    
-    # Slice the arrays for the 1-second window
-    p_diff_win = phase_diff_wrapped[window_start:window_end]
-    
-    # Calculate complex exponentials using the wrapped difference
-    complex_exp = np.exp(1j * phase_diff_wrapped)
-    c_exp_win = complex_exp[window_start:window_end]
-
-    # ---------------------------------------------------------
     # WINDOW 2: Panel (d) Phase Difference
     # ---------------------------------------------------------
     fig2, ax4 = plt.subplots(figsize=(10, 4))
     
-    # Plot the phase difference as HOLLOW black discrete circles
     ax4.plot(t_win, p_diff_win, marker='o', markerfacecolor='none', 
              markeredgecolor='black', markersize=4, linestyle='None')
     
-    # --- ADD THE FILLED MARKER CIRCLES ---
-    # Select two specific points in time to mark
     idx_blue = int(len(t_win) * 0.3) 
     idx_magenta = int(len(t_win) * 0.8) 
     
-    # Draw the Blue and Magenta SOLID circles
     ax4.plot(t_win[idx_blue], p_diff_win[idx_blue], marker='o', 
              color='blue', markersize=10, linestyle='None')
              
     ax4.plot(t_win[idx_magenta], p_diff_win[idx_magenta], marker='o', 
              color='magenta', markersize=10, linestyle='None')
-    # ------------------------------
 
     ax4.set_ylabel("ΔΦ [rad]")
     ax4.set_title("(d) Phase Difference (C4 - C3)")
     ax4.set_xlabel("Time [s]")
-    
-    # Lock the Y-axis exactly to the boundaries the paper specifies
     ax4.set_ylim(-np.pi, np.pi)
     ax4.set_yticks([-np.pi, 0, np.pi])
     ax4.set_yticklabels([r'$-\pi$', '0', r'$\pi$'])
@@ -382,25 +240,19 @@ if __name__ == "__main__":
     # ---------------------------------------------------------
     fig3, ax5 = plt.subplots(figsize=(6, 6))
     
-    # Draw the empty unit circle
     circle = plt.Circle((0, 0), 1, color='black', fill=False, linestyle='--')
     ax5.add_patch(circle)
     
-    # Plot the phase differences on the unit circle as HOLLOW black discrete circles
     ax5.plot(np.real(c_exp_win), np.imag(c_exp_win), marker='o', 
              markerfacecolor='none', markeredgecolor='black', 
              markersize=4, linestyle='None', alpha=0.7, label='exp(i*ΔΦ)')
     
-    # --- ADD THE FILLED MARKER CIRCLES TO THE COMPLEX PLANE ---
-    # Draw the exact same Blue and Magenta points on the circle
     ax5.plot(np.real(c_exp_win[idx_blue]), np.imag(c_exp_win[idx_blue]), 
              marker='o', color='blue', markersize=10, linestyle='None')
              
     ax5.plot(np.real(c_exp_win[idx_magenta]), np.imag(c_exp_win[idx_magenta]), 
              marker='o', color='magenta', markersize=10, linestyle='None')
-    # ----------------------------------------------------------
     
-    # Calculate mean vector and draw red arrow + red dot (PSI)
     mean_vector = np.mean(c_exp_win)
     ax5.arrow(0, 0, np.real(mean_vector), np.imag(mean_vector), 
               color='red', head_width=0.05, length_includes_head=True, linewidth=2)

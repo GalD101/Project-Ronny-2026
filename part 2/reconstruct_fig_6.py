@@ -48,6 +48,9 @@ def process_patient_ecg(patient_id, ecg_dir='./ecg'):
     
     # Keep only the beats where the difference is 30% (0.30) or less
     df_ecg_clean = df_ecg_clean[pct_diff <= 0.30].copy()
+
+    # Recompute R-R intervals so gaps created by dropped artifacts are measured correctly:
+    df_ecg_clean['rr_interval'] = df_ecg_clean['t_beat_sec'].diff()
     
     # 5. Resample to a 1 Hz Grid
     # Find the very first and very last valid second in the recording

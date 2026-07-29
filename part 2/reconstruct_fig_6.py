@@ -58,15 +58,43 @@ def process_patient_ecg(patient_id, ecg_dir='./ecg'):
     # Default spacing for np.arange is 1, so we don't need to specify it explicitly.
     t_grid = np.arange(start_sec, end_sec + 1)
 
+    # Set timestamps as the index and heart rate as values
+    ser = df_ecg_clean.set_index('t_beat_sec')['hr_bpm']
+    
+    # Union the original heartbeat index with the 1 Hz target grid
+    # example:
+    #   ser.index (irregular actual beats) = [1.15, 2.02, 2.88, 3.74]
+    #   t_grid    (desired 1 Hz clock)     = [1, 2, 3, 4]
+    #   combined_index (sorted union)      = [1.0, 1.15, 2.0, 2.02, 2.88, 3.0, 3.74, 4.0]
+    combined_index = ser.index.union(t_grid)
+    
+    # Reindex to combine both timelines and apply Pandas linear index interpolation
+    hr_interpolated = ser.reindex(combined_index).interpolate(method='index') # TODO: change this in the future if you do a PR to try to add a max_gap parameter to interpolate function in pandas
+    
+    # Extract only the 1 Hz grid points
+    hr_1hz = hr_interpolated.loc[t_grid].to_numpy(copy=True) # this fixes an error, I used .values before
+
+    # 6. The 5-Second Gap Rule (Vectorized mask)
+    next_beat_idx = np.searchsorted(df_ecg_clean['t_beat_sec'], t_grid)
+    next_beat_idx = np.clip(next_beat_idx, 0, len(df_ecg_clean) - 1)
+    
+    interval_sizes = df_ecg_clean['rr_interval'].values[next_beat_idx]
+    hr_1hz[interval_sizes > 5.0] = np.nan
+    
+    # Return the clean DataFrame
+    df_1hz = pd.DataFrame({'time': t_grid, 'hr': hr_1hz})
+    return df_1hz.dropna().reset_index(drop=True)
+
+    # Below is also the np.interp method, I will try to use pandas instead
     # Interpolate all points instantly and only then filter the long gaps out
     # I am not so comfortable with this, because we interpolate everything and then filter out long gaps instead of interpolating only the points we need.
     # However, to my knowledge it is actually the most efficient way to do it.
     # TODO: maybe open an issue in Pandas or neurokit2 or mnepython and maybe try to offer a PR
-    hr_1hz = np.interp(t_grid, 
-                       df_ecg_clean['t_beat_sec'], 
-                       df_ecg_clean['hr_bpm'], 
-                       left=np.nan, 
-                       right=np.nan)
+    # hr_1hz = np.interp(t_grid, 
+    #                    df_ecg_clean['t_beat_sec'], 
+    #                    df_ecg_clean['hr_bpm'], 
+    #                    left=np.nan, 
+    #                    right=np.nan)
 
     # IGNORE THIS:
     {
@@ -80,6 +108,7 @@ def process_patient_ecg(patient_id, ecg_dir='./ecg'):
     # hr_1hz = interp_func(t_grid)
     
     # # 6. The 5-Second Gap Rule # unfortunately, there is no max_gap parameter in the interp1d function, and there will probably never be because this is actually deprecated (https://docs.scipy.org/doc/scipy/reference/generated/scipy.interpolate.interp1d.html) so I will actually use a different method instead. Commenting this code now...
+    # # So apperantly it is better and more efficient to interpolate and then mask since masking introduces conditional branching and makes the cache and the way the CPU run less efficient. Either way I am adding a feature to pandas to be able to pass a "max_gap" like variable so that will be encapsulated within the pandas engine.
     # # since the function "will draw a straight line between the two nearest known points and use that to estimate the value at the desired point",\
     # # it will happily interpolate across gaps in the data, even if those gaps are huge (e.g., 10 seconds, 20 seconds, etc.).
     # # this is unwanted behavior; we need to find those gaps and erase the interpolated data that falls inside them.
@@ -103,18 +132,18 @@ def process_patient_ecg(patient_id, ecg_dir='./ecg'):
 
     # 6. The 5-Second Gap Rule (100% Vectorized — No slow 'for' loops!)
     # Find which R-R interval each second in t_grid belongs to
-    next_beat_idx = np.searchsorted(df_ecg_clean['t_beat_sec'], t_grid)
-    next_beat_idx = np.clip(next_beat_idx, 0, len(df_ecg_clean) - 1)
+    # next_beat_idx = np.searchsorted(df_ecg_clean['t_beat_sec'], t_grid)
+    # next_beat_idx = np.clip(next_beat_idx, 0, len(df_ecg_clean) - 1)
     
-    # Grab the interval sizes for every second on the grid
-    interval_sizes = df_ecg_clean['rr_interval'].values[next_beat_idx]
+    # # Grab the interval sizes for every second on the grid
+    # interval_sizes = df_ecg_clean['rr_interval'].values[next_beat_idx]
     
-    # Instantly mask any second that fell inside a gap > 5.0 seconds
-    hr_1hz[interval_sizes > 5.0] = np.nan
+    # # Instantly mask any second that fell inside a gap > 5.0 seconds
+    # hr_1hz[interval_sizes > 5.0] = np.nan
     
-    # Return the clean DataFrame
-    df_1hz = pd.DataFrame({'time': t_grid, 'hr': hr_1hz})
-    return df_1hz.dropna().reset_index(drop=True)
+    # # Return the clean DataFrame
+    # df_1hz = pd.DataFrame({'time': t_grid, 'hr': hr_1hz})
+    # return df_1hz.dropna().reset_index(drop=True)
 
 
 if __name__ == "__main__":
@@ -124,3 +153,6 @@ if __name__ == "__main__":
     
     print(f"--- ECG Data for Patient {patient_id} ---")
     print(df_ecg.head())
+
+    with open("output.txt", "w", encoding="utf-8") as file:
+        file.write(df_ecg.to_string())

@@ -1,4 +1,5 @@
-
+import os
+import glob
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -20,6 +21,9 @@ def process_patient_ecg(patient_id, ecg_dir='./ecg'):
     # skiprows=1 skips the metadata header line. 
     # Since it is a single column of integers after the header, we explicitly name it.
     df_ecg = pd.read_csv(ecg_filepath, skiprows=1, names=['r_peak_ms'])
+
+    # 1. Chronological sort & deduplicate identical millisecond detections
+    df_ecg = df_ecg.sort_values('r_peak_ms').drop_duplicates(subset=['r_peak_ms']).reset_index(drop=True)
     
     # 2. Convert timestamps from milliseconds to seconds
     # t_beat = ms / 1000
@@ -149,13 +153,128 @@ def process_patient_ecg(patient_id, ecg_dir='./ecg'):
     # return df_1hz.dropna().reset_index(drop=True)
 
 
-if __name__ == "__main__":
-    # Test the function on the first patient
-    patient_id = "205804"
-    df_ecg = process_patient_ecg(patient_id)
-    
-    print(f"--- ECG Data for Patient {patient_id} ---")
-    print(df_ecg.head())
 
-    with open("output.txt", "w", encoding="utf-8") as file:
-        file.write(df_ecg.to_string())
+# Assume process_patient_ecg is imported or defined above
+
+def validate_step_1(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2'):
+    """
+    Runs the 4 mandatory STEP 1 QC checks on all matching subjects.
+    """
+    # Find all subjects who have a Sigma N2 file
+    sigma_files = glob.glob(os.path.join(sigma_dir, "*.csv"))
+    patient_ids = [os.path.splitext(os.path.basename(f))[0] for f in sigma_files]
+    
+    qc_results = []
+    
+    print(f"Starting STEP 1 validation for {len(patient_ids)} subjects...\n")
+    
+    for pid in patient_ids:
+        ecg_path = os.path.join(ecg_dir, f"{pid}_1.ecg")
+        sigma_path = os.path.join(sigma_dir, f"{pid}.csv")
+        
+        # Check if matching ECG file exists
+        if not os.path.exists(ecg_path):
+            print(f"[WARNING] Missing ECG file for subject {pid}: expected {ecg_path}")
+            continue
+            
+        # 1. Process ECG
+        try:
+            # Process the ECG data for this patient
+            df_hr = process_patient_ecg(pid, ecg_dir=ecg_dir)
+        except Exception as e:
+            print(f"[ERROR] Failed to process ECG for subject {pid}: {e}")
+            continue
+        
+        # 2. Load Sigma N2 timestamps for Clock Alignment check
+        df_sigma = pd.read_csv(sigma_path, usecols=['time'])
+        
+        # --- METRICS CALCULATION ---
+        median_hr = df_hr['hr'].median()
+        duration_hrs = df_hr['time'].max() / 3600.0
+        
+        # Clock overlap: what percentage of N2 seconds exist in our 1-Hz HR trace?
+        hr_time_set = set(df_hr['time'])
+        n2_time_set = set(df_sigma['time'])
+        overlap_count = len(n2_time_set.intersection(hr_time_set))
+        overlap_pct = (overlap_count / len(n2_time_set)) * 100.0 if len(n2_time_set) > 0 else 0
+        
+        qc_results.append({
+            'patient_id': pid,
+            'median_hr': median_hr,
+            'duration_hrs': duration_hrs,
+            'n2_overlap_pct': overlap_pct,
+            'df_hr_clean': df_hr # Kept for plotting below
+        })
+        
+    df_qc = pd.DataFrame(qc_results)
+    
+    # --- CHECK 1 & 2: SUMMARY STATS ---
+    print("="*60)
+    print("CHECK 1 & 2: POPULATION HEART RATE & DURATION SUMMARY")
+    print("="*60)
+    print(df_qc[['median_hr', 'duration_hrs', 'n2_overlap_pct']].describe().to_string())
+    print("\n")
+    
+    # Outlier detection
+    bad_hr = df_qc[(df_qc['median_hr'] < 55) | (df_qc['median_hr'] > 85)]
+    if not bad_hr.empty:
+        print(f"[ALERT] {len(bad_hr)} subjects have suspicious median HR (<55 or >85 bpm):")
+        print(bad_hr[['patient_id', 'median_hr', 'duration_hrs']].to_string(index=False))
+    else:
+        print("[PASS] All subjects have physiological median resting HRs.")
+
+    # --- CHECK 3: CLOCK ALIGNMENT ---
+    print("\n" + "="*60)
+    print("CHECK 3: CLOCK ALIGNMENT (ECG vs SIGMA N2)")
+    print("="*60)
+    bad_overlap = df_qc[df_qc['n2_overlap_pct'] < 90.0]
+    if not bad_overlap.empty:
+        print(f"[ALERT] {len(bad_overlap)} subjects have <90% N2 clock overlap with ECG:")
+        print(bad_overlap[['patient_id', 'n2_overlap_pct']].to_string(index=False))
+    else:
+        print("[PASS] Clock alignment successful. N2 timestamps cleanly overlap with ECG trace.")
+
+    # --- CHECK 4: VISUAL SANITY CHECK (3-5 Subjects) ---
+    print("\n" + "="*60)
+    print("CHECK 4: VISUAL INSPECTION (Plotting 3 sample subjects)")
+    print("="*60)
+    
+    sample_subjects = df_qc.sample(min(3, len(df_qc)), random_state=42)
+    
+    fig, axes = plt.subplots(len(sample_subjects), 1, figsize=(12, 3 * len(sample_subjects)), sharey=True)
+    if len(sample_subjects) == 1:
+        axes = [axes]
+        
+    for ax, (_, row) in zip(axes, sample_subjects.iterrows()):
+        df_sample = row['df_hr_clean']
+        pid = row['patient_id']
+        
+        # Grab a 15-minute window (900 seconds) from the middle of the recording
+        mid_time = df_sample['time'].median()
+        window = df_sample[(df_sample['time'] >= mid_time) & (df_sample['time'] <= mid_time + 900)]
+        
+        ax.plot(window['time'] / 60.0, window['hr'], color='black', lw=1)
+        ax.set_title(f"Patient {pid} — 15-Minute Sample Window (Median HR: {row['median_hr']:.1f} bpm)", fontsize=10)
+        ax.set_ylabel("HR (bpm)")
+        ax.grid(True, alpha=0.3)
+        
+    axes[-1].set_xlabel("Time (Minutes from Recording Start)")
+    plt.tight_layout()
+    plt.show()
+
+    return df_qc
+
+if __name__ == "__main__":
+    # Run validation
+    df_qc = validate_step_1(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2')
+
+# if __name__ == "__main__":
+#     # Test the function on the first patient
+#     patient_id = "205804"
+#     df_ecg = process_patient_ecg(patient_id)
+    
+#     print(f"--- ECG Data for Patient {patient_id} ---")
+#     print(df_ecg.head())
+
+#     with open("output.txt", "w", encoding="utf-8") as file:
+#         file.write(df_ecg.to_string())

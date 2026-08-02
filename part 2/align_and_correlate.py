@@ -2,6 +2,7 @@ import os
 import glob
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 def safe_zscore(series: pd.Series, ddof: int = 1) -> pd.Series | None:
     """
@@ -25,11 +26,11 @@ def align_and_preprocess_subject(
     Step 2: Aligns the 1-Hz heart rate trace with the N2 Sigma EEG envelope.
     
     1. Loads the precomputed 1-Hz HR trace from disk.
-    2. Loads N2 sigma envelope data[cite: 8].
-    3. Performs an inner join on integer 'time' (restricts HR exclusively to N2 sleep)[cite: 8].
-    4. Normalizes sigma envelope to % of its nightly N2 mean[cite: 8].
-    5. Applies a 4-second centered symmetric moving average to sigma_pct[cite: 8].
-    6. Leaves instantaneous heart rate unsmoothed[cite: 8].
+    2. Loads N2 sigma envelope data.
+    3. Performs an inner join on integer 'time' (restricts HR exclusively to N2 sleep).
+    4. Normalizes sigma envelope to % of its nightly N2 mean.
+    5. Applies a 4-second centered symmetric moving average to sigma_pct.
+    6. Leaves instantaneous heart rate unsmoothed.
 
     Parameters
     ----------
@@ -41,7 +42,7 @@ def align_and_preprocess_subject(
         Directory containing Sigma N2 CSV files.
     use_power : bool, default True
         If True, squares the amplitude envelope to convert to sigma power before 
-        normalizing[cite: 8]. If False, uses the raw amplitude envelope[cite: 8].
+        normalizing. If False, uses the raw amplitude envelope.
     """
     hr_path = os.path.join(hr_dir, f"{pid}.csv")
     sigma_path = os.path.join(sigma_dir, f"{pid}.csv")
@@ -53,24 +54,24 @@ def align_and_preprocess_subject(
     df_hr = pd.read_csv(hr_path)
     df_sigma = pd.read_csv(sigma_path, usecols=['time', 'envelope'])
 
-    # Square the envelope before normalizing if strict power units are requested[cite: 8]
+    # Square the envelope before normalizing if strict power units are requested
     # OPTIONAL
     if use_power:
         df_sigma['envelope'] = df_sigma['envelope'] ** 2
 
-    # 2. Calculate the nightly N2 mean BEFORE any dropping/joining[cite: 8]
+    # 2. Calculate the nightly N2 mean BEFORE any dropping/joining
     mean_n2_envelope = df_sigma['envelope'].mean()
     if mean_n2_envelope == 0 or np.isnan(mean_n2_envelope):
         raise ValueError(f"Sigma envelope mean is 0 or NaN for subject {pid}.")
 
-    # 3. Inner join on integer 'time' -> restricts data exclusively to shared N2 sleep seconds[cite: 8]
+    # 3. Inner join on integer 'time' -> restricts data exclusively to shared N2 sleep seconds
     df_aligned = pd.merge(df_hr, df_sigma, on='time', how='inner')
     df_aligned = df_aligned.sort_values('time').reset_index(drop=True)
 
-    # 4. Normalize sigma to % of nightly N2 mean[cite: 8]
+    # 4. Normalize sigma to % of nightly N2 mean
     df_aligned['sigma_pct'] = (100.0 * df_aligned['envelope']) / mean_n2_envelope
 
-    # 5. Apply a 4-second centered (symmetric) moving average to sigma_pct[cite: 8]
+    # 5. Apply a 4-second centered (symmetric) moving average to sigma_pct
     df_aligned['sigma_smooth'] = (
         df_aligned['sigma_pct']
         .rolling(window=4, center=True)
@@ -104,32 +105,32 @@ def cut_and_zscore_windows(df_clean: pd.DataFrame, window_len: int = 120) -> lis
         A list of DataFrames, where each DataFrame is exactly 120 rows long
         and contains z-scored columns: 'hr_z' and 'sigma_z'.
     """
-    # 1. Identify continuous stretches where time increments by exactly 1 second[cite: 8]
-    # A jump in time (> 1 second) increments the stretch_id[cite: 8]
-    # neatly use cumsum of boolean mask to create unique stretch IDs[cite: 8]
+    # 1. Identify continuous stretches where time increments by exactly 1 second
+    # A jump in time (> 1 second) increments the stretch_id
+    # neatly use cumsum of boolean mask to create unique stretch IDs
     stretch_ids = (df_clean['time'].diff() != 1).cumsum()
     
     windows = []
     
-    # 2. Process each continuous stretch independently[cite: 8]
+    # 2. Process each continuous stretch independently
     for _, stretch in df_clean.groupby(stretch_ids):
         n_seconds = len(stretch)
         
-        # If the stretch is shorter than window_len (e.g. 120 s), drop it[cite: 8]
+        # If the stretch is shorter than window_len (e.g. 120 s), drop it
         if n_seconds < window_len:
             continue
             
-        # Calculate how many complete 120-s windows fit in this stretch[cite: 8]
+        # Calculate how many complete 120-s windows fit in this stretch
         n_windows = n_seconds // window_len
         
-        # Truncate any trailing remainder that doesn't fit into a full 120-s window[cite: 8]
+        # Truncate any trailing remainder that doesn't fit into a full 120-s window
         stretch_truncated = stretch.iloc[: n_windows * window_len].copy()
         
         # Assign a local window number (0, 1, 2, ...) within this stretch
         # neatly use the // operator to assign window IDs: 0, 1, 2, ... , window_len will be 0, then window_len + 1, window_len + 2, ... 2*window_len will get 1, etc.
         stretch_truncated['window_id'] = np.arange(len(stretch_truncated)) // window_len
         
-        # 3. Z-score 'hr' and 'sigma_smooth' independently within each 120-s window[cite: 8]
+        # 3. Z-score 'hr' and 'sigma_smooth' independently within each 120-s window
         for _, win in stretch_truncated.groupby('window_id'):
             win_copy = win.copy()
 
@@ -152,37 +153,132 @@ def cut_and_zscore_windows(df_clean: pd.DataFrame, window_len: int = 120) -> lis
             
     return windows
 
+def bounded_xcorr(x: np.ndarray, y: np.ndarray, max_lag: int = 60) -> np.ndarray:
+    """
+    Computes the cross-correlation R(tau) = sum(x(t + tau) * y(t))
+    and returns ONLY the symmetric window from -max_lag to +max_lag.
+    
+    Returns an array of length (2 * max_lag + 1).
+    """
+    n = len(x)
 
-# --- TEST SNIPPET ---
-if __name__ == "__main__":
-    test_pid = "200001"
+    full_xcorr = np.correlate(x, y, mode='full')
+    
+    # Why is Lag 0 at index n - 1?
+    # mode='full' returns an array of length 2*n - 1 (covering lags from -(n-1) to +(n-1)).
+    # The exact center index where neither signal is shifted (Lag 0, perfect alignment) is:
+    #   center_index = (2*n - 1) // 2 = n - 1
+    zero_idx = n - 1
+    
+    return full_xcorr[zero_idx - max_lag : zero_idx + max_lag + 1]
+
+def compute_subject_xcorr(
+    windows: list[pd.DataFrame], 
+    max_lag: int = 60, 
+    min_windows: int = 3
+) -> pd.DataFrame | None:
+    """
+    Step 4: Computes the normalized cross-correlation for each 120-s window
+    and averages them within-subject.
+    """
+    # "Minimum-data rule"
+    if len(windows) < min_windows:
+        return None
+
+    lags = np.arange(-max_lag, max_lag + 1)
+    window_xcorrs = []
+    
+    for win in windows:
+        hr_z = win['hr_z'].to_numpy()
+        sigma_z = win['sigma_z'].to_numpy()
+        n = len(hr_z) # "Heart rate is the source signal." so we will use its length to determine the number of overlapping samples at each lag
+
+        # Get the 121 symmetric lag points (-60 to +60)
+        xcorr_slice = bounded_xcorr(sigma_z, hr_z, max_lag=max_lag)
+        
+        # Normalize by exact number of overlapping samples at each lag
+        overlaps = n - np.abs(lags)
+        r_vals = xcorr_slice / overlaps
+        
+        window_xcorrs.append(r_vals)
+
+    # Stack all window curves (shape: [n_windows, len(lags)])
+    xcorr_matrix = np.vstack(window_xcorrs)
+    
+    # Average across windows (within-subject mean)
+    df_subject_r = pd.DataFrame({
+        'lag': lags,
+        'r_mean': xcorr_matrix.mean(axis=0),
+        'r_std': xcorr_matrix.std(axis=0, ddof=1),
+        'n_windows': len(windows)
+    })
+    
+    return df_subject_r
+
+if __name__ == "__main__":    
+    test_pid = "200006"
     
     try:
+        # Step 2: Align
         df_step2 = align_and_preprocess_subject(test_pid, use_power=True)
-        print(f"--- Step 2 Alignment Successful for Patient {test_pid} ---")
-        
-        # Run Step 3
+        # Step 3: Window & Z-score
         windows = cut_and_zscore_windows(df_step2, window_len=120)
-        print(f"\n--- Step 3 Windowing & Z-Scoring Successful ---")
-        print(f"Total valid 120-second windows extracted: {len(windows)}")
+        # Step 4: Cross-Correlate & Average
+        df_xcorr = compute_subject_xcorr(windows, max_lag=60, min_windows=3)
         
-        if windows:
-            print("\nSample of Window #0 (first 5 seconds):")
-            print(windows[0].head())
-            print("\nVerification of Z-score properties for Window #0:")
-            print(f"  hr_z mean     : {windows[0]['hr_z'].mean():.6f} (should be ~0.0)")
-            print(f"  hr_z std      : {windows[0]['hr_z'].std():.6f} (should be ~1.0)")
-            print(f"  sigma_z mean  : {windows[0]['sigma_z'].mean():.6f} (should be ~0.0)")
-            print(f"  sigma_z std   : {windows[0]['sigma_z'].std():.6f} (should be ~1.0)")
+        if df_xcorr is not None:
+            print(f"--- Step 4 Within-Subject XCorr Successful for Patient {test_pid} ---")
+            print(f"Analyzed {df_xcorr['n_windows'].iloc[0]} windows across lags -60 to +60 s.")
+            
+            # Find where correlation peaks
+            peak_row = df_xcorr.loc[df_xcorr['r_mean'].idxmax()]
+            print(f"\nPeak positive correlation: r = {peak_row['r_mean']:.4f} at lag = {int(peak_row['lag'])} s")
+            
+            # Quick preview plot of Panel D
+            plt.figure(figsize=(8, 4))
+            plt.plot(df_xcorr['lag'], df_xcorr['r_mean'], color='black', lw=1.5)
+            plt.axvline(0, color='red', linestyle='--', alpha=0.7, label='Lag 0')
+            plt.title(f"Panel D Preview — Single-Subject Correlogram ({test_pid})")
+            plt.xlabel("Lag τ (s) [Positive = Sigma lags HR]")
+            plt.ylabel("Correlation (r)")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.tight_layout()
+            plt.show()
             
     except Exception as e:
         print(f"[ERROR] Could not process {test_pid}: {e}")
+
+# # --- TEST SNIPPET ---
+# if __name__ == "__main__":
+#     test_pid = "200001"
+    
+#     try:
+#         df_step2 = align_and_preprocess_subject(test_pid, use_power=True)
+#         print(f"--- Step 2 Alignment Successful for Patient {test_pid} ---")
+        
+#         # Run Step 3
+#         windows = cut_and_zscore_windows(df_step2, window_len=120)
+#         print(f"\n--- Step 3 Windowing & Z-Scoring Successful ---")
+#         print(f"Total valid 120-second windows extracted: {len(windows)}")
+        
+#         if windows:
+#             print("\nSample of Window #0 (first 5 seconds):")
+#             print(windows[0].head())
+#             print("\nVerification of Z-score properties for Window #0:")
+#             print(f"  hr_z mean     : {windows[0]['hr_z'].mean():.6f} (should be ~0.0)")
+#             print(f"  hr_z std      : {windows[0]['hr_z'].std():.6f} (should be ~1.0)")
+#             print(f"  sigma_z mean  : {windows[0]['sigma_z'].mean():.6f} (should be ~0.0)")
+#             print(f"  sigma_z std   : {windows[0]['sigma_z'].std():.6f} (should be ~1.0)")
+            
+#     except Exception as e:
+#         print(f"[ERROR] Could not process {test_pid}: {e}")
 
 # if __name__ == "__main__":
 #     test_pid = "200001"
     
 #     try:
-#         # Toggle use_power=True here to match Lecci et al. (2017) power units[cite: 8]
+#         # Toggle use_power=True here to match Lecci et al. (2017) power units
 #         df_step2 = align_and_preprocess_subject(test_pid, use_power=True)
 #         print(f"--- Step 2 Alignment Successful for Patient {test_pid} (use_power=True) ---")
 #         print(df_step2.head(10))

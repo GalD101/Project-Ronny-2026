@@ -166,16 +166,19 @@ def process_patient_ecg(patient_id, ecg_dir='./ecg'):
     # return df_1hz.dropna().reset_index(drop=True)
 
 
-def validate_step_1(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2', report_file='step_1_validation_report.txt'):
+def run_step_1_pipeline(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2', output_dir='./hr_1hz', report_file='step_1_validation_report.txt', plot_filename='step_1_visual_inspection.png'):
     """
     Runs STEP 1 QC (Quality Control) checks on all subjects, writes verbose logs to report_file,
     and prints concise progress to the console.
     """
+    # 1. Ensure the output directory exists
+    os.makedirs(output_dir, exist_ok=True)
+
     sigma_files = glob.glob(os.path.join(sigma_dir, "*.csv"))
     patient_ids = sorted([os.path.splitext(os.path.basename(f))[0] for f in sigma_files])
     
     qc_results = []
-    print(f"Processing {len(patient_ids)} subjects... Detailed report will be saved to '{report_file}'.")
+    print(f"Processing {len(patient_ids)} subjects... Saving 1-Hz HR traces to '{output_dir}/'.")
 
     for pid in patient_ids:
         ecg_path = os.path.join(ecg_dir, f"{pid}_1.ecg")
@@ -187,6 +190,10 @@ def validate_step_1(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2', report_fil
             
         try:
             df_hr = process_patient_ecg(pid, ecg_dir=ecg_dir)
+
+            # --- SAVE TO DISK ---
+            out_filepath = os.path.join(output_dir, f"{pid}.csv")
+            df_hr.to_csv(out_filepath, index=False)
 
             # Load only the time column (the envelope will be analyzed later)
             df_sigma = pd.read_csv(sigma_path, usecols=['time'])
@@ -273,7 +280,6 @@ def validate_step_1(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2', report_fil
         
     axes[-1].set_xlabel("Time (Minutes from Recording Start)")
     plt.tight_layout()
-    plot_filename = 'step_1_visual_inspection.png'
     plt.savefig(plot_filename, dpi=150)
     plt.show()
     print(f"Visual inspection plot saved to '{plot_filename}'.")
@@ -281,7 +287,9 @@ def validate_step_1(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2', report_fil
     return df_qc
 
 if __name__ == "__main__":
-    df_qc = validate_step_1(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2')
+    df_qc = run_step_1_pipeline(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2',
+                                output_dir='./hr_1hz', report_file='step_1_validation_report.txt',
+                                plot_filename='step_1_visual_inspection.png')
 
 # if __name__ == "__main__":
 #     # Test the function on the first patient

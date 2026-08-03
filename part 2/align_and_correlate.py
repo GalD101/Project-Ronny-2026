@@ -268,85 +268,155 @@ def compute_grand_average(subject_results: dict[str, pd.DataFrame | None]) -> pd
     
     return df_grand
 
+def plot_panel_c_example(
+    pid: str, 
+    df_clean: pd.DataFrame, 
+    duration_sec: int = 180,
+    save_filename: str = "Panel_C_Example_Bout.png"
+) -> None:
+    """
+    Step 5 (Panel C): Plots a representative ~180-second continuous N2 sleep stretch
+    with dual Y-axes: Sigma Power % of mean (red, left) and Heart Rate bpm (black, right).
+    """
+    # 1. Identify continuous N2 sleep stretches where time increments by exactly 1 s
+    stretch_ids = (df_clean['time'].diff() != 1).cumsum()
+    
+    selected_stretch = None
+    
+    # 2. Search for a continuous stretch at least 'duration_sec' long
+    for _, stretch in df_clean.groupby(stretch_ids):
+        if len(stretch) >= duration_sec:
+            # Grab a slice from the middle of the stretch to avoid edge artifacts
+            mid_idx = len(stretch) // 2
+            start_idx = max(0, mid_idx - (duration_sec // 2))
+            selected_stretch = stretch.iloc[start_idx : start_idx + duration_sec].copy()
+            break
+            
+    if selected_stretch is None:
+        raise ValueError(f"No continuous N2 stretch >= {duration_sec}s found for subject {pid}.")
 
+    # Make time relative to the start of the plotted window (0 to 180 s)
+    t_rel = np.arange(len(selected_stretch))
+    sigma_vals = selected_stretch['sigma_smooth'].to_numpy()
+    hr_vals = selected_stretch['hr'].to_numpy()
+
+    # 3. Create the dual Y-axis plot
+    fig, ax_left = plt.subplots(figsize=(10, 4.5))
+
+    # --- LEFT Y-AXIS: Sigma Power (% of N2 Mean) in RED ---
+    color_sigma = '#d62728'  # Strong red
+    ax_left.set_xlabel("Time (s)", fontsize=11)
+    ax_left.set_ylabel("Sigma-Band Power (% of N2 mean)", color=color_sigma, fontsize=11, fontweight='bold')
+    line1 = ax_left.plot(t_rel, sigma_vals, color=color_sigma, lw=2.0, label="Sigma Power (11.5–16 Hz)")
+    ax_left.tick_params(axis='y', labelcolor=color_sigma)
+    ax_left.grid(True, alpha=0.25)
+
+    # --- RIGHT Y-AXIS: Instantaneous Heart Rate (bpm) in BLACK ---
+    ax_right = ax_left.twinx()  # Share the same X-axis
+    color_hr = '#000000'        # Black
+    ax_right.set_ylabel("Heart Rate (bpm)", color=color_hr, fontsize=11, fontweight='bold')
+    line2 = ax_right.plot(t_rel, hr_vals, color=color_hr, lw=1.8, linestyle='-', label="Heart Rate (bpm)")
+    ax_right.tick_params(axis='y', labelcolor=color_hr)
+
+    # Combine legends from both axes
+    lines = line1 + line2
+    labels = [l.get_label() for l in lines]
+    ax_left.legend(lines, labels, loc='upper right', framealpha=0.9)
+
+    plt.title(f"Panel C — Human N2 Sleep Example Bout (Subject {pid})", fontsize=13, pad=10)
+    plt.tight_layout()
+    
+    # Save to disk
+    plt.savefig(save_filename, dpi=300)
+    print(f"Saved Panel C example plot as '{save_filename}'.")
+    plt.show()
 
 if __name__ == "__main__":
-    import glob
-    import matplotlib.pyplot as plt
+    test_pid = "200002"
+    
+    # Run Step 2 to get the clean N2 trace
+    df_step2 = align_and_preprocess_subject(test_pid, use_power=True)
+    
+    # Generate Panel C
+    plot_panel_c_example(test_pid, df_step2, duration_sec=180, save_filename="Panel_C_Example_Bout.png")
 
-    # 1. Automatically find all subject IDs from the CSV files in your HR directory
-    hr_files = sorted(glob.glob('./hr_1hz/*.csv'))
-    all_pids = [os.path.splitext(os.path.basename(f))[0] for f in hr_files]
+# if __name__ == "__main__":
+#     import glob
+#     import matplotlib.pyplot as plt
+
+#     # 1. Automatically find all subject IDs from the CSV files in your HR directory
+#     hr_files = sorted(glob.glob('./hr_1hz/*.csv'))
+#     all_pids = [os.path.splitext(os.path.basename(f))[0] for f in hr_files]
     
-    print(f"Found {len(all_pids)} subject files in './hr_1hz'. Starting batch processing...\n")
+#     print(f"Found {len(all_pids)} subject files in './hr_1hz'. Starting batch processing...\n")
     
-    subject_results = {}
+#     subject_results = {}
     
-    # 2. Process every subject through Step 2 -> Step 3 -> Step 4
-    for pid in all_pids:
-        try:
-            df_step2 = align_and_preprocess_subject(pid, use_power=True)
-            windows = cut_and_zscore_windows(df_step2, window_len=120)
-            df_xcorr = compute_subject_xcorr(windows, max_lag=60, min_windows=3)
+#     # 2. Process every subject through Step 2 -> Step 3 -> Step 4
+#     for pid in all_pids:
+#         try:
+#             df_step2 = align_and_preprocess_subject(pid, use_power=True)
+#             windows = cut_and_zscore_windows(df_step2, window_len=120)
+#             df_xcorr = compute_subject_xcorr(windows, max_lag=60, min_windows=3)
             
-            subject_results[pid] = df_xcorr
+#             subject_results[pid] = df_xcorr
             
-            if df_xcorr is not None:
-                print(f"  [PASS] Subject {pid}: {df_xcorr['n_windows'].iloc[0]} windows analyzed.")
-            else:
-                print(f"  [DROP] Subject {pid}: Insufficient windows (< 3).")
+#             if df_xcorr is not None:
+#                 print(f"  [PASS] Subject {pid}: {df_xcorr['n_windows'].iloc[0]} windows analyzed.")
+#             else:
+#                 print(f"  [DROP] Subject {pid}: Insufficient windows (< 3).")
                 
-        except Exception as e:
-            print(f"  [ERROR] Subject {pid} failed: {e}")
-            subject_results[pid] = None
+#         except Exception as e:
+#             print(f"  [ERROR] Subject {pid} failed: {e}")
+#             subject_results[pid] = None
 
-    print("\n-------------------------------------------")
+#     print("\n-------------------------------------------")
     
-    # 3. Run Stage 2: Grand Average across all valid subjects
-    try:
-        df_panel_f = compute_grand_average(subject_results)
+#     # 3. Run Stage 2: Grand Average across all valid subjects
+#     try:
+#         df_panel_f = compute_grand_average(subject_results)
         
-        # Find where the grand-mean correlation peaks
-        peak_row = df_panel_f.loc[df_panel_f['grand_mean'].idxmax()]
-        print(f"\nGroup-Level Peak: r = {peak_row['grand_mean']:.4f} at lag = {int(peak_row['lag'])} s")
+#         # Find where the grand-mean correlation peaks
+#         peak_row = df_panel_f.loc[df_panel_f['grand_mean'].idxmax()]
+#         print(f"\nGroup-Level Peak: r = {peak_row['grand_mean']:.4f} at lag = {int(peak_row['lag'])} s")
         
-        # 4. Plot Panel F: Grand Average Correlogram with SEM Shading
-        lags = df_panel_f['lag']
-        g_mean = df_panel_f['grand_mean']
-        g_sem = df_panel_f['sem']
+#         # 4. Plot Panel F: Grand Average Correlogram with SEM Shading
+#         lags = df_panel_f['lag']
+#         g_mean = df_panel_f['grand_mean']
+#         g_sem = df_panel_f['sem']
         
-        plt.figure(figsize=(9, 5))
+#         plt.figure(figsize=(9, 5))
         
-        # Plot the mean curve
-        plt.plot(lags, g_mean, color='#1f77b4', lw=2.0, label='Grand Mean (N2 Sleep)')
+#         # Plot the mean curve
+#         plt.plot(lags, g_mean, color='#1f77b4', lw=2.0, label='Grand Mean (N2 Sleep)')
         
-        # Plot the shaded SEM error band (Panel F style)
-        plt.fill_between(
-            lags, 
-            g_mean - g_sem, 
-            g_mean + g_sem, 
-            color='#1f77b4', 
-            alpha=0.25, 
-            label=f'± 1 SEM (N = {df_panel_f["n_subjects"].iloc[0]})'
-        )
+#         # Plot the shaded SEM error band (Panel F style)
+#         plt.fill_between(
+#             lags, 
+#             g_mean - g_sem, 
+#             g_mean + g_sem, 
+#             color='#1f77b4', 
+#             alpha=0.25, 
+#             label=f'± 1 SEM (N = {df_panel_f["n_subjects"].iloc[0]})'
+#         )
         
-        plt.axvline(0, color='red', linestyle='--', alpha=0.7, label='Lag 0')
-        plt.axhline(0, color='black', linestyle='-', alpha=0.3)
+#         plt.axvline(0, color='red', linestyle='--', alpha=0.7, label='Lag 0')
+#         plt.axhline(0, color='black', linestyle='-', alpha=0.3)
         
-        plt.title("Panel F — Grand-Mean Heart Rate / Sigma-Band Power Cross-Correlation")
-        plt.xlabel("Lag τ (s) [Positive = Sigma lags HR]")
-        plt.ylabel("Correlation (r)")
-        plt.grid(True, alpha=0.3)
-        plt.legend(loc='upper right')
-        plt.tight_layout()
+#         plt.title("Panel F — Grand-Mean Heart Rate / Sigma-Band Power Cross-Correlation")
+#         plt.xlabel("Lag τ (s) [Positive = Sigma lags HR]")
+#         plt.ylabel("Correlation (r)")
+#         plt.grid(True, alpha=0.3)
+#         plt.legend(loc='upper right')
+#         plt.tight_layout()
         
-        # Save the plot so you can attach it to your email to Ronny!
-        plt.savefig("Panel_F_Grand_Average_Reproduction.png", dpi=300)
-        print("Saved plot as 'Panel_F_Grand_Average_Reproduction.png'.")
-        plt.show()
+#         # Save the plot so you can attach it to your email to Ronny!
+#         plt.savefig("Panel_F_Grand_Average_Reproduction.png", dpi=300)
+#         print("Saved plot as 'Panel_F_Grand_Average_Reproduction.png'.")
+#         plt.show()
         
-    except Exception as e:
-        print(f"[FATAL ERROR] Could not compute grand average: {e}")
+#     except Exception as e:
+#         print(f"[FATAL ERROR] Could not compute grand average: {e}")
 
 # if __name__ == "__main__":    
 #     test_pid = "200006"

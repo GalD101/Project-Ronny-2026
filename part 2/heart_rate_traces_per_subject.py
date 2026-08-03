@@ -51,11 +51,11 @@ def process_patient_ecg(patient_id, ecg_dir='./ecg'):
     # Calculate how far off the current beat is from its local median (as a percentage)
     pct_diff = np.abs(df_ecg_clean['hr_bpm'] - rolling_median) / rolling_median
     
-    # Keep only the beats where the difference is 20% (0.20) or less (again, Gemini thinks 20% is what needs to be used, TODO: check what is best later)
+    # Keep only the beats where the difference is 20% (0.20) or less (again, Gemini thinks 20% is what needs to be used)
     df_ecg_clean = df_ecg_clean[pct_diff <= 0.20].copy()
 
-    # Recompute R-R intervals so gaps created by dropped artifacts are measured correctly:
-    df_ecg_clean['rr_interval'] = df_ecg_clean['t_beat_sec'].diff() #TODO: check why we need to do this again
+    # Recompute R-R intervals so gaps created by dropped artifact beats are accurately measured for the 5-second gap rule
+    df_ecg_clean['rr_interval'] = df_ecg_clean['t_beat_sec'].diff()
 
     # Drop the first row since it contains NaNs from the .diff() calculation
     df_ecg_clean = df_ecg_clean.dropna().reset_index(drop=True)

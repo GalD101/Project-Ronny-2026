@@ -332,161 +332,130 @@ def plot_panel_c_example(
     plt.show()
 
 if __name__ == "__main__":
-    test_pid = "200002"
-    
-    # Run Step 2 to get the clean N2 trace
-    df_step2 = align_and_preprocess_subject(test_pid, use_power=True)
-    
-    # Generate Panel C
-    plot_panel_c_example(test_pid, df_step2, duration_sec=180, save_filename="Panel_C_Example_Bout.png")
+    import glob
+    import matplotlib.pyplot as plt
 
-# if __name__ == "__main__":
-#     import glob
-#     import matplotlib.pyplot as plt
+    # =========================================================================
+    # EXECUTION TOGGLES: Set to True/False to control what the script runs
+    # =========================================================================
+    RUN_PANEL_C = True          # Plot single-subject example bout (Panel C)
+    RUN_PANEL_D = True          # Plot single-subject correlogram (Panel D)
+    RUN_FULL_COHORT = True      # Run batch processing & plot Grand Average (Panel F)
+    
+    SAMPLE_SUBJECT_ID = "200006" # Clean representative subject (Median HR: 66.4 bpm, 100% overlap)
+    # =========================================================================
 
-#     # 1. Automatically find all subject IDs from the CSV files in your HR directory
-#     hr_files = sorted(glob.glob('./hr_1hz/*.csv'))
-#     all_pids = [os.path.splitext(os.path.basename(f))[0] for f in hr_files]
-    
-#     print(f"Found {len(all_pids)} subject files in './hr_1hz'. Starting batch processing...\n")
-    
-#     subject_results = {}
-    
-#     # 2. Process every subject through Step 2 -> Step 3 -> Step 4
-#     for pid in all_pids:
-#         try:
-#             df_step2 = align_and_preprocess_subject(pid, use_power=True)
-#             windows = cut_and_zscore_windows(df_step2, window_len=120)
-#             df_xcorr = compute_subject_xcorr(windows, max_lag=60, min_windows=3)
+    # -------------------------------------------------------------------------
+    # 1. GENERATE PANEL C (Representative Dual Y-Axis Example Bout)
+    # -------------------------------------------------------------------------
+    if RUN_PANEL_C:
+        print(f"--- Generating Figure 6 Panel C for Subject {SAMPLE_SUBJECT_ID} ---")
+        try:
+            df_step2 = align_and_preprocess_subject(SAMPLE_SUBJECT_ID, use_power=True)
+            plot_panel_c_example(
+                pid=SAMPLE_SUBJECT_ID, 
+                df_clean=df_step2, 
+                duration_sec=180, 
+                save_filename=f"Panel_C_Example_Bout_{SAMPLE_SUBJECT_ID}.png"
+            )
+        except Exception as e:
+            print(f"[ERROR] Could not generate Panel C: {e}")
+
+    # -------------------------------------------------------------------------
+    # 2. GENERATE PANEL D (Single-Subject Cross-Correlogram)
+    # -------------------------------------------------------------------------
+    if RUN_PANEL_D:
+        print(f"\n--- Generating Figure 6 Panel D for Subject {SAMPLE_SUBJECT_ID} ---")
+        try:
+            df_step2 = align_and_preprocess_subject(SAMPLE_SUBJECT_ID, use_power=True)
+            windows = cut_and_zscore_windows(df_step2, window_len=120)
+            df_xcorr = compute_subject_xcorr(windows, max_lag=60, min_windows=3)
             
-#             subject_results[pid] = df_xcorr
-            
-#             if df_xcorr is not None:
-#                 print(f"  [PASS] Subject {pid}: {df_xcorr['n_windows'].iloc[0]} windows analyzed.")
-#             else:
-#                 print(f"  [DROP] Subject {pid}: Insufficient windows (< 3).")
+            if df_xcorr is not None:
+                plt.figure(figsize=(8, 4))
+                plt.plot(df_xcorr['lag'], df_xcorr['r_mean'], color='black', lw=1.5, label=f'Subject {SAMPLE_SUBJECT_ID}')
+                plt.axvline(0, color='red', linestyle='--', alpha=0.7, label='Lag 0')
+                plt.title(f"Panel D — Single-Subject Cross-Correlogram ({SAMPLE_SUBJECT_ID})")
+                plt.xlabel("Lag τ (s) [Positive = Sigma lags HR]")
+                plt.ylabel("Correlation (r)")
+                plt.grid(True, alpha=0.3)
+                plt.legend(loc='upper right')
+                plt.tight_layout()
                 
-#         except Exception as e:
-#             print(f"  [ERROR] Subject {pid} failed: {e}")
-#             subject_results[pid] = None
+                save_d = f"Panel_D_Single_Subject_{SAMPLE_SUBJECT_ID}.png"
+                plt.savefig(save_d, dpi=300)
+                print(f"Saved Panel D plot as '{save_d}'.")
+                plt.show()
+            else:
+                print(f"[WARNING] Subject {SAMPLE_SUBJECT_ID} did not have enough windows for Panel D.")
+        except Exception as e:
+            print(f"[ERROR] Could not generate Panel D: {e}")
 
-#     print("\n-------------------------------------------")
-    
-#     # 3. Run Stage 2: Grand Average across all valid subjects
-#     try:
-#         df_panel_f = compute_grand_average(subject_results)
+    # -------------------------------------------------------------------------
+    # 3. GENERATE PANEL F (Full Cohort Batch Processing & Grand Average)
+    # -------------------------------------------------------------------------
+    if RUN_FULL_COHORT:
+        print("\n--- Starting Full Cohort Processing for Figure 6 Panel F ---")
+        hr_files = sorted(glob.glob('./hr_1hz/*.csv'))
+        all_pids = [os.path.splitext(os.path.basename(f))[0] for f in hr_files]
+        total_subjects = len(all_pids)
         
-#         # Find where the grand-mean correlation peaks
-#         peak_row = df_panel_f.loc[df_panel_f['grand_mean'].idxmax()]
-#         print(f"\nGroup-Level Peak: r = {peak_row['grand_mean']:.4f} at lag = {int(peak_row['lag'])} s")
+        print(f"Found {total_subjects} subject files in './hr_1hz'. Processing line-by-line...\n")
+        subject_results = {}
         
-#         # 4. Plot Panel F: Grand Average Correlogram with SEM Shading
-#         lags = df_panel_f['lag']
-#         g_mean = df_panel_f['grand_mean']
-#         g_sem = df_panel_f['sem']
-        
-#         plt.figure(figsize=(9, 5))
-        
-#         # Plot the mean curve
-#         plt.plot(lags, g_mean, color='#1f77b4', lw=2.0, label='Grand Mean (N2 Sleep)')
-        
-#         # Plot the shaded SEM error band (Panel F style)
-#         plt.fill_between(
-#             lags, 
-#             g_mean - g_sem, 
-#             g_mean + g_sem, 
-#             color='#1f77b4', 
-#             alpha=0.25, 
-#             label=f'± 1 SEM (N = {df_panel_f["n_subjects"].iloc[0]})'
-#         )
-        
-#         plt.axvline(0, color='red', linestyle='--', alpha=0.7, label='Lag 0')
-#         plt.axhline(0, color='black', linestyle='-', alpha=0.3)
-        
-#         plt.title("Panel F — Grand-Mean Heart Rate / Sigma-Band Power Cross-Correlation")
-#         plt.xlabel("Lag τ (s) [Positive = Sigma lags HR]")
-#         plt.ylabel("Correlation (r)")
-#         plt.grid(True, alpha=0.3)
-#         plt.legend(loc='upper right')
-#         plt.tight_layout()
-        
-#         # Save the plot so you can attach it to your email to Ronny!
-#         plt.savefig("Panel_F_Grand_Average_Reproduction.png", dpi=300)
-#         print("Saved plot as 'Panel_F_Grand_Average_Reproduction.png'.")
-#         plt.show()
-        
-#     except Exception as e:
-#         print(f"[FATAL ERROR] Could not compute grand average: {e}")
+        for idx, pid in enumerate(all_pids, start=1):
+            try:
+                df_step2 = align_and_preprocess_subject(pid, use_power=True)
+                windows = cut_and_zscore_windows(df_step2, window_len=120)
+                df_xcorr = compute_subject_xcorr(windows, max_lag=60, min_windows=3)
+                
+                subject_results[pid] = df_xcorr
+                
+                # Print real-time line-by-line status for EVERY subject
+                if df_xcorr is not None:
+                    n_win = df_xcorr['n_windows'].iloc[0]
+                    print(f"[{idx:4d}/{total_subjects}] [PASS] Subject {pid}: {n_win:3d} windows analyzed.")
+                else:
+                    print(f"[{idx:4d}/{total_subjects}] [DROP] Subject {pid}: Insufficient windows (< 3).")
+                    
+            except Exception as e:
+                print(f"[{idx:4d}/{total_subjects}] [ERROR] Subject {pid} failed: {e}")
+                subject_results[pid] = None
 
-# if __name__ == "__main__":    
-#     test_pid = "200006"
-    
-#     try:
-#         # Step 2: Align
-#         df_step2 = align_and_preprocess_subject(test_pid, use_power=True)
-#         # Step 3: Window & Z-score
-#         windows = cut_and_zscore_windows(df_step2, window_len=120)
-#         # Step 4: Cross-Correlate & Average
-#         df_xcorr = compute_subject_xcorr(windows, max_lag=60, min_windows=3)
-        
-#         if df_xcorr is not None:
-#             print(f"--- Step 4 Within-Subject XCorr Successful for Patient {test_pid} ---")
-#             print(f"Analyzed {df_xcorr['n_windows'].iloc[0]} windows across lags -60 to +60 s.")
+        print("\n-------------------------------------------")
+        try:
+            df_panel_f = compute_grand_average(subject_results)
             
-#             # Find where correlation peaks
-#             peak_row = df_xcorr.loc[df_xcorr['r_mean'].idxmax()]
-#             print(f"\nPeak positive correlation: r = {peak_row['r_mean']:.4f} at lag = {int(peak_row['lag'])} s")
+            peak_row = df_panel_f.loc[df_panel_f['grand_mean'].idxmax()]
+            print(f"\nGroup-Level Peak: r = {peak_row['grand_mean']:.4f} at lag = {int(peak_row['lag'])} s")
             
-#             # Quick preview plot of Panel D
-#             plt.figure(figsize=(8, 4))
-#             plt.plot(df_xcorr['lag'], df_xcorr['r_mean'], color='black', lw=1.5)
-#             plt.axvline(0, color='red', linestyle='--', alpha=0.7, label='Lag 0')
-#             plt.title(f"Panel D Preview — Single-Subject Correlogram ({test_pid})")
-#             plt.xlabel("Lag τ (s) [Positive = Sigma lags HR]")
-#             plt.ylabel("Correlation (r)")
-#             plt.grid(True, alpha=0.3)
-#             plt.legend()
-#             plt.tight_layout()
-#             plt.show()
+            lags = df_panel_f['lag']
+            g_mean = df_panel_f['grand_mean']
+            g_sem = df_panel_f['sem']
             
-#     except Exception as e:
-#         print(f"[ERROR] Could not process {test_pid}: {e}")
-
-# # --- TEST SNIPPET ---
-# if __name__ == "__main__":
-#     test_pid = "200001"
-    
-#     try:
-#         df_step2 = align_and_preprocess_subject(test_pid, use_power=True)
-#         print(f"--- Step 2 Alignment Successful for Patient {test_pid} ---")
-        
-#         # Run Step 3
-#         windows = cut_and_zscore_windows(df_step2, window_len=120)
-#         print(f"\n--- Step 3 Windowing & Z-Scoring Successful ---")
-#         print(f"Total valid 120-second windows extracted: {len(windows)}")
-        
-#         if windows:
-#             print("\nSample of Window #0 (first 5 seconds):")
-#             print(windows[0].head())
-#             print("\nVerification of Z-score properties for Window #0:")
-#             print(f"  hr_z mean     : {windows[0]['hr_z'].mean():.6f} (should be ~0.0)")
-#             print(f"  hr_z std      : {windows[0]['hr_z'].std():.6f} (should be ~1.0)")
-#             print(f"  sigma_z mean  : {windows[0]['sigma_z'].mean():.6f} (should be ~0.0)")
-#             print(f"  sigma_z std   : {windows[0]['sigma_z'].std():.6f} (should be ~1.0)")
+            plt.figure(figsize=(9, 5))
+            plt.plot(lags, g_mean, color='#1f77b4', lw=2.0, label='Grand Mean (N2 Sleep)')
+            plt.fill_between(
+                lags, 
+                g_mean - g_sem, 
+                g_mean + g_sem, 
+                color='#1f77b4', 
+                alpha=0.25, 
+                label=f'± 1 SEM (N = {df_panel_f["n_subjects"].iloc[0]})'
+            )
+            plt.axvline(0, color='red', linestyle='--', alpha=0.7, label='Lag 0')
+            plt.axhline(0, color='black', linestyle='-', alpha=0.3)
             
-#     except Exception as e:
-#         print(f"[ERROR] Could not process {test_pid}: {e}")
-
-# if __name__ == "__main__":
-#     test_pid = "200001"
-    
-#     try:
-#         # Toggle use_power=True here to match Lecci et al. (2017) power units
-#         df_step2 = align_and_preprocess_subject(test_pid, use_power=True)
-#         print(f"--- Step 2 Alignment Successful for Patient {test_pid} (use_power=True) ---")
-#         print(df_step2.head(10))
-#         print(f"\nTotal aligned N2 seconds ready for Step 3: {len(df_step2)}")
-#     except Exception as e:
-#         print(f"[ERROR] Could not process {test_pid}: {e}")
-
-    
+            plt.title("Panel F — Grand-Mean Heart Rate / Sigma-Band Power Cross-Correlation")
+            plt.xlabel("Lag τ (s) [Positive = Sigma lags HR]")
+            plt.ylabel("Correlation (r)")
+            plt.grid(True, alpha=0.3)
+            plt.legend(loc='upper right')
+            plt.tight_layout()
+            
+            plt.savefig("Panel_F_Grand_Average_Reproduction.png", dpi=300)
+            print("Saved plot as 'Panel_F_Grand_Average_Reproduction.png'.")
+            plt.show()
+            
+        except Exception as e:
+            print(f"[FATAL ERROR] Could not compute grand average: {e}")

@@ -169,23 +169,25 @@ def process_patient_ecg(patient_id, ecg_dir='./ecg'):
 def run_step_1_pipeline(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2', output_dir='./hr_1hz', report_file='step_1_validation_report.txt', plot_filename='step_1_visual_inspection.png'):
     """
     Runs STEP 1 QC (Quality Control) checks on all subjects, writes verbose logs to report_file,
-    and prints concise progress to the console.
+    and prints live line-by-line progress to the console.
     """
     # 1. Ensure the output directory exists
     os.makedirs(output_dir, exist_ok=True)
 
     sigma_files = glob.glob(os.path.join(sigma_dir, "*.csv"))
     patient_ids = sorted([os.path.splitext(os.path.basename(f))[0] for f in sigma_files])
+    total_subjects = len(patient_ids)
     
     qc_results = []
-    print(f"Processing {len(patient_ids)} subjects... Saving 1-Hz HR traces to '{output_dir}/'.")
+    print(f"Processing {total_subjects} subjects... Saving 1-Hz HR traces to '{output_dir}/'.\n")
 
-    for pid in patient_ids:
+    # Add enumerate(..., start=1) to track the exact line number
+    for idx, pid in enumerate(patient_ids, start=1):
         ecg_path = os.path.join(ecg_dir, f"{pid}_1.ecg")
         sigma_path = os.path.join(sigma_dir, f"{pid}.csv")
         
         if not os.path.exists(ecg_path):
-            print(f"[WARNING] Missing ECG file for subject {pid}: expected {ecg_path}")
+            print(f"[{idx:4d}/{total_subjects}] [SKIP] Subject {pid}: Missing ECG file ({ecg_path})")
             continue
             
         try:
@@ -198,23 +200,14 @@ def run_step_1_pipeline(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2', output
             # Load only the time column (the envelope will be analyzed later)
             df_sigma = pd.read_csv(sigma_path, usecols=['time'])
 
-            # Calculate the median heart rate (should be between 60-75 BPM)
+            # Calculate metrics
             median_hr = df_hr['hr'].median()
-
-            # Calculate the total sleep duration in hours
             duration_hrs = df_hr['time'].max() / 3600.0
 
-            # Clock alignment (critical)
-            # a set of the timestamps where a heartbeat was detected
+            # Clock alignment check
             hr_time_set = set(df_hr['time'])
-
-            # a set of the timestamps where N2 sleep was detected
             n2_time_set = set(df_sigma['time'])
-
-            # calculate the intersection of the two sets to find overlapping timestamps (time points that are both in N2 sleep and also heart beat was recorded)
             overlap_count = len(n2_time_set.intersection(hr_time_set))
-
-            # calculate the percentage of N2 timestamps that have a corresponding heartbeat detection
             overlap_pct = (overlap_count / len(n2_time_set)) * 100.0 if len(n2_time_set) > 0 else 0
             
             qc_results.append({
@@ -224,8 +217,12 @@ def run_step_1_pipeline(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2', output
                 'n2_overlap_pct': overlap_pct,
                 'df_hr_clean': df_hr
             })
+
+            # Print real-time line-by-line status
+            print(f"[{idx:4d}/{total_subjects}] [PASS] Subject {pid} | Median HR: {median_hr:5.1f} bpm | Overlap: {overlap_pct:5.1f}% | Dur: {duration_hrs:4.2f} h")
+
         except Exception as e:
-            print(f"[ERROR] Skipping patient {pid} due to processing error: {e}")
+            print(f"[{idx:4d}/{total_subjects}] [ERROR] Subject {pid} failed: {e}")
             
     df_qc = pd.DataFrame(qc_results)
     
@@ -258,7 +255,7 @@ def run_step_1_pipeline(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2', output
         f.write("--- FULL COHORT METRICS TABLE ---\n")
         f.write(df_qc[['patient_id', 'median_hr', 'duration_hrs', 'n2_overlap_pct']].to_string(index=False))
 
-    print(f"Validation complete! Report saved to '{report_file}'.")
+    print(f"\nValidation complete! Report saved to '{report_file}'.")
     
     # --- CHECK 4: SAVE VISUAL INSPECTION PLOT ---
     sample_subjects = df_qc.sample(min(3, len(df_qc)), random_state=42)
@@ -290,14 +287,3 @@ if __name__ == "__main__":
     df_qc = run_step_1_pipeline(ecg_dir='./ecg', sigma_dir='./Sigma_Envelope_N2',
                                 output_dir='./hr_1hz', report_file='step_1_validation_report.txt',
                                 plot_filename='step_1_visual_inspection.png')
-
-# if __name__ == "__main__":
-#     # Test the function on the first patient
-#     patient_id = "205804"
-#     df_ecg = process_patient_ecg(patient_id)
-    
-#     print(f"--- ECG Data for Patient {patient_id} ---")
-#     print(df_ecg.head())
-
-#     with open("output.txt", "w", encoding="utf-8") as file:
-#         file.write(df_ecg.to_string())

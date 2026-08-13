@@ -134,7 +134,7 @@ def compute_grand_average(subject_results: dict[str, pd.DataFrame | None]) -> pd
 
 def compute_subject_psd(df_clean: pd.DataFrame, min_window_sec: int = 180) -> tuple[np.ndarray, np.ndarray] | None:
     """
-    Computes Welch's PSD for continuous N2 sleep stretches and averages them per subject.
+    Computes Welch's PSD (Power Spectral Density) for continuous N2 sleep stretches and averages them per subject.
     """
     stretch_ids = (df_clean['time'].diff() != 1).cumsum()
     psd_list = []
@@ -143,9 +143,10 @@ def compute_subject_psd(df_clean: pd.DataFrame, min_window_sec: int = 180) -> tu
     for _, stretch in df_clean.groupby(stretch_ids):
         if len(stretch) >= min_window_sec:
             data = stretch['sigma_smooth'].to_numpy()
-            data = data - np.mean(data)
+            data = data - np.mean(data) # Apperantly this is common practice. I didn't do it initially but AI told me I should and it looks like it is right.
 
-            # Welch's method with a 128s segment to resolve the ~0.02 Hz peak cleanly
+            # NOTE: I am not familiar with this Welch's method, but the AI changed my code to use this
+            # Welch's method with a 128s segment to resolve the ~0.02 Hz peak cleanly (thank you AI, I didn't know about this)
             f, pxx = welch(data, fs=1.0, window='hann', nperseg=128, noverlap=64)
 
             if freqs is None:
@@ -171,10 +172,10 @@ def compute_subject_naive_fft(df_clean: pd.DataFrame, window_sec: int = 180) -> 
             # 1. Truncate to exact length so all FFTs have identical frequency bins
             data = stretch['sigma_smooth'].to_numpy()[:window_sec]
 
-            # 2. Subtract the mean
+            # 2. Subtract the mean (again, this is common practice for FFTs to remove DC offset)
             data = data - np.mean(data)
 
-            # 3. Naive FFT (power spectrum)
+            # 3. Naive FFT (power spectrum) (my original implementation, Welch's method is more robust and is preferred apparently)
             fft_power = np.abs(np.fft.rfft(data)) ** 2
 
             # 4. Calculate the frequency X-axis
@@ -233,6 +234,7 @@ def plot_panel_c_example(
     hr_vals = selected_stretch['hr'].to_numpy()
 
     # --- LOW PASS FILTER (Cutoff ~0.04 Hz) ---
+    # I originally intended to use my own implementation of a low-pass filter, but AI suggested this instead.
     b, a = butter(2, 0.04 / 0.5, btype='low') 
     sigma_lowpass = filtfilt(b, a, sigma_vals)
     hr_lowpass = filtfilt(b, a, hr_vals)
